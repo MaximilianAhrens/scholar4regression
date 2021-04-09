@@ -39,11 +39,11 @@ Adding covariates (--topic-covars) is optional.
 Example for running SCHOLAR with k = 10 topics in a supervised fashion with a regression task (based on model extension).
 Adding covariates (--topic-covars) is optional.
 
-Regression task with linear regression network: $$y = W\theta$$
+Regression task with linear regression network: `y = W\theta`, where `\theta` are the features of topic shares (and optionally additional covariates) and `W` represents the regression weights. 
 
 `python run_scholar_tf.py input_dir -k 10 --test test --topic-covars covar_file --labels target_variable_file --task "reg" --r-layers 0`
 
-Regression task with non-linear regression network with 2 hidden layers: $y = f(W,\theta)$
+Regression task with non-linear regression network with 2 hidden layers: `y = f(W,\theta)`, where `f` represents the neutral network for regression and `W` are all the regression network parameters.
 
 `python run_scholar_tf.py input_dir -k 10 --test test --topic-covars covar_file --labels target_variable_file --task "reg" --r-layers 2`
 
