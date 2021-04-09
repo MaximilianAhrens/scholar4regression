@@ -228,6 +228,7 @@ def main():
     print("Network architecture:")
     for key, val in network_architecture.items():
         print(key + ':', val)
+    print("train-val-set shuffle:", train_dev_shuffle)
 
     # load pretrained word vectors
     if word2vec_file is not None:
