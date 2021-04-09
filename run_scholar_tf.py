@@ -26,7 +26,7 @@ def main():
                       help='Initial learning rate: default=%default')
     parser.add_option('-m', dest='momentum', default=0.99,
                       help='beta1 for Adam: default=%default')
-    parser.add_option('--epochs', dest='epochs', default=250,
+    parser.add_option('--epochs', dest='epochs', default=200,
                       help='Number of epochs: default=%default')
     parser.add_option('--train-prefix', type=str, default='train',
                       help='Prefix of train set: default=%default')
