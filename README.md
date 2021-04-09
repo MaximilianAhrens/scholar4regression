@@ -26,6 +26,7 @@ The github page of the [original model](https://github.com/dallascard/scholar) p
 
 ## Unsupervised topic learning:
 Example for running SCHOLAR with k = 10 topics in an unsupervised fashion (based on original model)
+
 `python run_scholar_tf.py input_dir -k 10 --test test --topic-covars`
 
 ## Supervised topic learning + classification:
@@ -39,8 +40,11 @@ Example for running SCHOLAR with k = 10 topics in a supervised fashion with a re
 Adding covariates (--topic-covars) is optional.
 
 Regression task with linear regression network: $y = W\theta$
+
 `python run_scholar_tf.py input_dir -k 10 --test test --topic-covars covar_file --labels target_variable_file --task "reg" --r-layers 0`
+
 Regression task with non-linear regression network with 2 hidden layers: $y = f(W,\theta)$
+
 `python run_scholar_tf.py input_dir -k 10 --test test --topic-covars covar_file --labels target_variable_file --task "reg" --r-layers 2`
 
 Options for the regression network are:
