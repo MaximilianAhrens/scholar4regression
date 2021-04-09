@@ -87,7 +87,7 @@ def main():
                       help='Number of layers in (generative) regression [0|1|2]: default=%default')
     parser.add_option('--task', dest='task', default="reg",
                       help='Select downstream task: either "class" or "reg".')
-    parser.add_option('--td-shuffle', dest='train_dev_shuffle', default="True",
+    parser.add_option('--td-shuffle', dest='train_dev_shuffle', default=False,
                       help='Whether to shuffle the training data for the train-dev split.')
 
 
