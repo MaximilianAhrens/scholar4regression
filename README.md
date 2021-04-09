@@ -16,13 +16,7 @@ The implementation is done based on the tensorflow version of the original model
 
 It is recommended that you install the requirements using Anaconda. Specifically, you can use the following commands to create a new environment, activate it, and install the necessary packages:
 
-`conda create -n scholar python=3`
-
-`source activate scholar`
-
-`conda install tensorflow==1.15.0`
-
-`conda install numpy scipy pandas gensim`
+`conda create -n scholar python=3 tensorflow==1.15.0 numpy scipy pandas gensim`
 
 Once the necessary packages are installed, there is no need to compile or install this repo.
 
