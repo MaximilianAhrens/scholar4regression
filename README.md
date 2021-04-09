@@ -24,16 +24,6 @@ Once the necessary packages are installed, there is no need to compile or instal
 ## Usage & Tutorial:
 The github page of the [original model](https://github.com/dallascard/scholar) provides a great description of the model's functionalities. It also provides you with a tutorial which is worth exploring. Read those instructions first to familiarse yourself with the model's user interface.
 
-## Unsupervised topic learning:
-Example for running SCHOLAR with k = 10 topics in an unsupervised fashion (based on original model)
-
-`python run_scholar_tf.py input_dir -k 10 --test test --topic-covars`
-
-## Supervised topic learning + classification:
-Example for running SCHOLAR with k = 10 topics in a supervised fashion with a classification task (based on original model).
-Adding covariates (--topic-covars) is optional.
-
-`python run_scholar_tf.py input_dir -k 10 --test test --topic-covars covar_file --labels target_variable_file --task "class"`
 
 ## Supervised topic learning + regression:
 Example for running SCHOLAR with k = 10 topics in a supervised fashion with a regression task (based on model extension).
@@ -49,6 +39,19 @@ Regression task with non-linear regression network with 2 hidden layers: `y = f(
 
 Options for the regression network are:
 --r-layers [0|1|2], where 0 is the default and corresponds to a linear regression.
+
+
+## Supervised topic learning + classification:
+Example for running SCHOLAR with k = 10 topics in a supervised fashion with a classification task (based on original model).
+Adding covariates (--topic-covars) is optional.
+
+`python run_scholar_tf.py input_dir -k 10 --test test --topic-covars covar_file --labels target_variable_file --task "class"`
+
+
+## Unsupervised topic learning:
+Example for running SCHOLAR with k = 10 topics in an unsupervised fashion (based on original model)
+
+`python run_scholar_tf.py input_dir -k 10 --test test --topic-covars`
 
 
 
