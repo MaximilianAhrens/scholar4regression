@@ -129,6 +129,7 @@ def main():
     seed = options.seed
     regression_layers = options.regression_layers
     task = options.task
+    train_dev_shuffle = options.train_dev_shuffle
     
     threads = int(options.threads)
     if seed is not None:
