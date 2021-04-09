@@ -1,4 +1,4 @@
-# Scholar 4 Regression
+# Scholar4Regression
 
 This is an extension of the [Scholar](https://arxiv.org/abs/1705.09296) model, which is a tool for modeling documents with metadata.
 The original model features a classifier network for downstream tasks. This extension adds a regression network to it, in order to allow applications for a wider range of supervised downstream tasks.
