@@ -57,7 +57,6 @@ Example for running SCHOLAR with k = 10 topics in an unsupervised fashion (based
 
 ## References
 
-If you find this repo useful, please be sure to cite the following publication:
-
+This SCHOLAR extension is based on the** original model** published as:
 * Dallas Card, Chenhao Tan, and Noah A. Smith. Neural Models for Documents with Metadata. In *Proceedings of ACL* (2018). [[paper](https://www.cs.cmu.edu/~dcard/resources/ACL_2018_paper.pdf)] [[supplementary](https://www.cs.cmu.edu/~dcard/resources/ACL_2018_supplementary.pdf)] [[BibTeX](https://github.com/dallascard/scholar/blob/master/scholar.bib)]
 
