@@ -919,7 +919,8 @@ def predict_labels_and_evaluate(model, X, Y, C, output_dir=None, subset='train',
         if output_dir is not None:
             fh.write_list_to_text([str(mse)], os.path.join(output_dir, 'mse.' + subset + '.txt'))
             fh.write_list_to_text([str(mse)], os.path.join(output_dir, 'pR2.' + subset + '.txt'))
-            
+    df_y = pd.DataFrame(data=[Y, predictions])
+    df_y.to_csv(os.path.join(output_dir, 'predictions_' + subset + '.csv'))
 
 if __name__ == '__main__':
     main()
