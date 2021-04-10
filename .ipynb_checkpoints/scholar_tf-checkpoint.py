@@ -427,6 +427,24 @@ class Scholar(object):
             task_loss = 0
             pred = -1
         return loss, task_loss, pred
+    
+
+    def predict_reg(self, X, C, eta_bn_prop=0.0, task=None):
+        """
+        Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
+        """
+        # set all regularization strenghts to be zero, since we don't care about topic reconstruction here
+        l2_strengths = np.zeros(self.network_weights['beta'].shape)
+        l2_strengths_c = np.zeros(self.network_weights['beta_c'].shape)
+        l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape)
+        # input a vector of all zeros in place of the labels that the model has been trained on
+        Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')        
+        batch_size = self.get_batch_size(X)
+        theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
+        
+        loss, task_loss, pred = self.sess.run((self.loss, self.task_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop, self.task: task})
+        return loss, task_loss, pred
+    
 
     def predict(self, X, C, eta_bn_prop=0.0, task=None):
         """
@@ -440,12 +458,14 @@ class Scholar(object):
         Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
-
+        
         if task == "class":
-            theta, pred = self.sess.run((self.theta, self.y_recon), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
+            theta, pred = self.sess.run((self.theta, self.y_recon), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop, self.task: task})
+            return theta, pred, _ , _
         elif task == "reg":
-            theta, pred = self.sess.run((self.theta, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
-        return theta, pred
+            loss, task_loss, theta, pred = self.sess.run((self.loss, self.task_loss, self.theta, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
+            return theta, pred, task_loss, loss
+                                                                                                                    
 
     def predict_from_topics(self, theta, C=None):
         """
