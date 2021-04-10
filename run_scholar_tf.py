@@ -617,7 +617,7 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
             loss, task_loss_i, pred = model.fit(batch_xs, batch_ys, batch_cs, l2_strengths=l2_strengths, 
                                              l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci,
                                              eta_bn_prop=eta_bn_prop, kld_weight=kld_weight)
-            # compute accuracy on minibatch
+            # compute accuracy/mse on minibatch
             if network_architecture['n_labels'] > 0 and task == "class":
                 task_loss += np.sum(pred == np.argmax(batch_ys, axis=1)) / float(n_train) # accuracy
             elif network_architecture['n_labels'] > 0 and task == "reg":
@@ -733,6 +733,11 @@ def predict_labels(model, X, C, eta_bn_prop=0.0, task = None):
     """
     n_items, vocab_size = X.shape
     predictions = np.zeros(n_items, dtype=int)
+    
+    if task == "class":
+        print("prediction task: classification")
+    elif task == "reg":
+        print("prediction task: regression")
 
     # predict items one by one
     for i in range(n_items):
@@ -745,12 +750,12 @@ def predict_labels(model, X, C, eta_bn_prop=0.0, task = None):
 
         # predict probabilities
         if task == "class":
-            z, y_recon = model.predict(X_i, C_i, eta_bn_prop=eta_bn_prop)
+            z, y_recon = model.predict(X_i, C_i, eta_bn_prop=eta_bn_prop, task=task)
             # take the label with the maximum predicted probability
             pred = np.argmax(y_recon)
             predictions[i] = pred
         if task == "reg":
-            z, pred = model.predict(X_i, C_i, eta_bn_prop=eta_bn_prop)
+            z, pred = model.predict(X_i, C_i, eta_bn_prop=eta_bn_prop,task=task)
             predictions[i] = pred
 
     return predictions
@@ -919,8 +924,10 @@ def predict_labels_and_evaluate(model, X, Y, C, output_dir=None, subset='train',
         if output_dir is not None:
             fh.write_list_to_text([str(mse)], os.path.join(output_dir, 'mse.' + subset + '.txt'))
             fh.write_list_to_text([str(mse)], os.path.join(output_dir, 'pR2.' + subset + '.txt'))
-    df_y = pd.DataFrame(data=[Y, predictions])
-    df_y.to_csv(os.path.join(output_dir, 'predictions_' + subset + '.csv'))
+    df_y = pd.DataFrame(data=Y, columns = "y_actual")
+    df_y_pred = pd.DataFrame(data=predictioms, columns = "y_pred")
+    df_y.to_csv(os.path.join(output_dir, 'y_actuals_' + subset + '.csv'))
+    df_y_pred.to_csv(os.path.join(output_dir, 'y_predictions_' + subset + '.csv'))
 
 if __name__ == '__main__':
     main()
