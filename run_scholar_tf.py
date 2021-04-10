@@ -945,7 +945,6 @@ def predict_labels(model, X, C, eta_bn_prop=0.0, task = None):
             predictions[i] = pred
             task_losses[i] = task_loss
             losses[i] = loss
-
     print("y_pred_test (first 10):", predictions[:10])
     print("task_losses_test (first 10):", task_losses[:10])
     print("losses_test (first 10):", losses[:10])

@@ -294,18 +294,17 @@ class Scholar(object):
             else:
                 regression_input = self.theta
             if regression_layers == 0:
-                decoded_y = slim.layers.linear(regression_input, n_labels, scope='y_decoder')
+                self.pred_y = slim.layers.linear(regression_input, n_labels, scope='pred_y')
             elif regression_layers == 1:
                 reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
                 reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
-                decoded_y = slim.layers.linear(reg0_sp, n_labels, scope='y_decoder')
+                self.pred_y = slim.layers.linear(reg0_sp, n_labels, scope='pred_y')
             else:
                 reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
                 reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
                 reg1 = slim.layers.linear(reg0_sp, dh, scope='reg1')
                 reg1_sp = tf.nn.softplus(reg1, name='reg1_softplus')
-                decoded_y = slim.layers.linear(reg1_sp, n_labels, scope='y_decoder')
-            self.pred_y = decoded_y        
+                self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
             
 
     def _initialize_weights(self):
@@ -403,6 +402,7 @@ class Scholar(object):
             else:
                 print("Using SGD")
                 self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
+
 
     def fit(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8):
         """
