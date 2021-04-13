@@ -305,7 +305,8 @@ def main():
                 np.savez(os.path.join(output_dir, 'beta_ci.npz'), beta=beta_ci, names=names)
             print("sparsity in covariate interactions = %0.4f" % sparsity)
             print("Combined covariates and interactions:")
-
+            
+        """
         if covar_emb_dim > 0:
             print_covariate_embeddings(model, covariate_names, output_dir)
 
@@ -342,15 +343,20 @@ def main():
             print("Test accuracy on covariates = %0.4f" % accuracy)
             if output_dir is not None:
                 fh.write_list_to_text([str(accuracy)], os.path.join(output_dir, 'accuracy.test.txt'))
+        """
 
     # evaluate accuracy/mse on labels
     if n_labels > 0:
         # train the model
         print("Model evaluation and testing")
         print("Predicting labels")
-        train_predictions, train_task_loss, train_avg_loss, train_avg_task_loss, train_eval_perplexity = test(model = model, network_architecture = network_architecture, X=train_X, Y=train_labels, C=train_covariates, regularize=auto_regularize, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal, batch_size = 200, output_dir = output_dir)
+        train_predictions, train_task_loss, train_avg_loss, train_avg_task_loss, train_eval_perplexity = test(model = model, network_architecture = network_architecture, X=train_X, Y=train_labels, C=train_covariates, regularize=auto_regularize, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal, batch_size = batch_size, output_dir = output_dir, subset ="train_eval", task = task)
         
-        test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_eval_perplexity = test(model=model, network_architecture=network_architecture, X=test_X, Y=test_labels, C=test_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = 200, output_dir = output_dir)
+        test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_eval_perplexity = test(model=model, network_architecture=network_architecture, X=test_X, Y=test_labels, C=test_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = batch_size, output_dir = output_dir, subset ="test_eval", task = task)
+        
+        #train_predictions, train_task_loss, train_avg_loss, train_avg_task_loss, train_eval_perplexity = test(model = model, network_architecture = network_architecture, X=train_X, Y=train_labels, C=train_covariates, regularize=auto_regularize, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal, batch_size = train_X.shape[0], output_dir = output_dir, subset ="train_eval")
+        
+        #test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_eval_perplexity = test(model=model, network_architecture=network_architecture, X=test_X, Y=test_labels, C=test_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = train_X.shape[0], output_dir = output_dir, subset ="test_eval")
         
         
         # dev
@@ -979,7 +985,7 @@ def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
     
 
 
-def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None, batch_size = 200,output_dir=None):
+def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None, batch_size = 200,output_dir=None, subset=None, task = None):
     """
     Predict a label for each instance using the classifier (or regression) part of the network
     """
@@ -987,6 +993,9 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
     dv = network_architecture['dv']
     n_topics = network_architecture['n_topics']
     task = network_architecture['task']
+    
+    # input a vector of all zeros in place of the labels that the model has been trained on
+    Y_zeros = np.zeros((n_items, network_architecture['n_labels'])).astype('float32')
 
     # create np arrays to store regularization strengths, which we'll update outside of the tensorflow model
     if regularize:
@@ -998,7 +1007,6 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
         l2_strengths_c = np.zeros([model.beta_c_length, dv])
         l2_strengths_ci = np.zeros([model.beta_ci_length, dv])
 
-    obs = 0
     total_batch = int(n_items / batch_size)
     print("nr of eval batches", total_batch)
     print("eval batch size", batch_size)
@@ -1007,7 +1015,7 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
     kld_weight = 1.0  # could use this to anneal KLD, but not currently doing so
 
     # Start evaluation cycle
-    predictions = np.zeros(n_items, dtype=int)
+    predictions = []
     avg_loss = 0.
     avg_task_loss = 0.
     task_loss = 0.
@@ -1019,10 +1027,10 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
     for i in range(total_batch):
         # get a minibatch
         ixs = range(batch_size*i,batch_size*(i+1))
-        obs_xs, obs_ys, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32')
+        obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), C[ixs, :].astype('float32')
         #print("val input shapes",obs_xs.shape, obs_ys.shape,obs_cs.shape)
         # do one update, passing in the data, regularization strengths, and bn
-        loss, task_loss_i, pred = model.eval_test(X=obs_xs, Y=obs_ys, C=obs_cs, l2_strengths=l2_strengths, 
+        loss, task_loss_i, pred, theta = model.eval_test(X=obs_xs, Y=obs_y_zeros, C=obs_cs, l2_strengths=l2_strengths, 
                                          l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci,
                                          eta_bn_prop=eta_bn_prop, kld_weight=kld_weight,is_training=False)
         # compute accuracy/mse on prediction
@@ -1033,8 +1041,12 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
         # Compute average loss
         avg_loss += loss / n_items
         avg_task_loss += task_loss_i / n_items
-        predictions[ixs] = np.squeeze(pred)
-        obs += 1
+        # Save predictions
+        if i==0:
+            predictions = pred
+        else:
+            predictions = np.append(predictions,pred,axis=0)
+            
         if np.isnan(avg_loss):
             print(i, np.sum(obs_xs, 1).astype(np.int), obs_xs.shape)
             print('Encountered NaN, stopping evaluation. Please check the learning_rate settings and the momentum.')
@@ -1044,34 +1056,39 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
         # Display logs per observations step
         if i % display_step == 0:
             if network_architecture['n_labels'] > 0:
-                print("EVAL | ","until obs:", '%d' % i, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; eval {} so far (noisy) =".format(task_name), "{:.9f}".format(task_loss))
+                print("EVAL {} | ".format(subset),"until obs:", '%d' % i, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; eval {} so far (noisy) =".format(task_name), "{:.9f}".format(task_loss))
                 if batch_size > 1:
-                    print("EVAL | y_act (i):\n", obs_ys[:10])
-                    print("EVAL | y_pred (i):\n", pred[:10])
+                    print("EVAL {} | y_act {}:\n".format(subset,i), obs_ys[:10])
+                    print("EVAL {} | y_pred {}:\n".format(subset,i), pred[:10])
                 else:
-                    print("EVAL | y_act (i):\n", obs_ys)
-                    print("EVAL | y_pred (i):\n", pred)
+                    print("EVAL {} | y_act {}:\n".format(subset,i), obs_ys)
+                    print("EVAL {} | y_pred {}:\n".format(subset,i), pred)
             else:
-                print("EVAL | ", "Obs:", '%d' % i, "loss=", "{:.9f}".format(avg_loss))
+                print("EVAL {} | ", "Obs:".format(subset), '%d' % i, "loss=", "{:.9f}".format(avg_loss))
 
     # Eval perplexity
     eval_perplexity = evaluate_perplexity(model, X, Y, C, eta_bn_prop=eta_bn_prop)
-    print("EVAL | perplexity = %0.4f" % (eval_perplexity))
-    print("EVAL | {}:".format(task_name),task_loss)
-    print("EVAL | avg. loss:",avg_loss)
+    print("EVAL {} | perplexity = {:.4f}".format(subset, eval_perplexity))
+    print("EVAL {} | {}:".format(subset, task_name),task_loss)
+    print("EVAL {} | avg. loss:".format(subset),avg_loss)
+    # Predictions
+    pred_series = pd.Series(predictions.squeeze())
     # only for mse 
-    pR = 1-(task_loss/np.var(Y))
-    print("R^2 on labels = %0.4f" % pR )
-    print("variance of y:", np.var(Y))
+    if task == "reg":
+        pR = 1-(task_loss/np.var(Y))
+        print("{} R^2 on labels = {:.4f}".format(subset, pR))
+        print("{} variance of y:".format(subset), np.var(Y))
+        if output_dir is not None:
+            fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, subset + '_mse.txt'))
+            fh.write_list_to_text([str(pR)], os.path.join(output_dir, subset + '_pR2.txt'))
     # save the results to file
     if output_dir is not None:
-        fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, 'mse.txt'))
-        fh.write_list_to_text([str(pR)], os.path.join(output_dir, 'pR2.txt'))
+        fh.write_list_to_text([str(pred_series)], os.path.join(output_dir, subset + '_predictions.txt'))
+        fh.write_list_to_text([str(pred)], os.path.join(output_dir, subset + '_lastred.txt'))
     # save actuals and predictions
-    df_y = pd.DataFrame(data=Y)
-    df_y_pred = pd.DataFrame(data=predictions)
-    df_y.to_csv(os.path.join(output_dir, 'y_actuals_.csv'))
-    df_y_pred.to_csv(os.path.join(output_dir, 'y_predictions_.csv'))
+    y_series = pd.DataFrame(Y)
+    y_series.to_csv(os.path.join(output_dir, subset + '_y_actuals.csv'))
+    pred_series.to_csv(os.path.join(output_dir, subset + '_y_predictions.csv'))
     
     return predictions, task_loss, avg_loss, avg_task_loss, eval_perplexity
     
