@@ -229,7 +229,6 @@ def main():
     for key, val in network_architecture.items():
         print(key + ':', val)
     print("train-val-set shuffle:", train_dev_shuffle)
-    print("regularize:", auto_regularize)
 
     # load pretrained word vectors
     if word2vec_file is not None:
@@ -345,22 +344,14 @@ def main():
 
     # evaluate accuracy/mse on labels
     if n_labels > 0:
-        # train the model
-        print("Model evaluation and testing")
         print("Predicting labels")
-        train_predictions, train_task_loss, train_avg_loss, train_avg_task_loss, train_eval_perplexity = test(model = model, network_architecture = network_architecture, X=train_X, Y=train_labels, C=train_covariates, regularize=auto_regularize, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal, batch_size = 200, output_dir = output_dir)
-        
-        test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_eval_perplexity = test(model=model, network_architecture=network_architecture, X=test_X, Y=test_labels, C=test_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = 200, output_dir = output_dir)
-        
-        
-        # dev
-        #predict_labels_and_evaluate(model, train_X, train_labels, train_covariates, output_dir, subset='train', task = task)
+        predict_labels_and_evaluate(model, train_X, train_labels, train_covariates, output_dir, subset='train', task = task)
 
-        #if dev_X is not None:
-        #    predict_labels_and_evaluate(model, dev_X, dev_labels, dev_covariates, output_dir, subset='dev', task = task)
+        if dev_X is not None:
+            predict_labels_and_evaluate(model, dev_X, dev_labels, dev_covariates, output_dir, subset='dev', task = task)
 
-        #if test_X is not None:
-        #    predict_labels_and_evaluate(model, test_X, test_labels, test_covariates, output_dir, subset='test', task = task)
+        if test_X is not None:
+            predict_labels_and_evaluate(model, test_X, test_labels, test_covariates, output_dir, subset='test', task = task)
     
     # Print associations between topics and labels
     if n_labels > 0 and task == "class":
@@ -583,7 +574,7 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
     return network_architecture
 
 
-def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=100, display_step=1, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
+def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=100, display_step=5, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
 
     n_train, dv = X.shape
     mb_gen = create_minibatch(X, Y, C, batch_size=batch_size, rng=rng)
@@ -666,8 +657,8 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
         if epoch % display_step == 0 and epoch > 0:
             if network_architecture['n_labels'] > 0:
                 print("Epoch:", '%d' % epoch, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; training {} (noisy) =".format(task_name), "{:.9f}".format(task_loss))
-                print("training | y_act (first 10):\n", batch_ys[:10])
-                print("training | y_pred (first 10):\n", pred[:10])
+                print("training | y_act (first 10):", batch_ys[:10])
+                print("training | y_pred (first 10):", pred[:10])
             else:
                 print("Epoch:", '%d' % epoch, "loss=", "{:.9f}".format(avg_loss))
 
@@ -675,15 +666,14 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                 dev_perplexity = evaluate_perplexity(model, X_dev, Y_dev, C_dev, eta_bn_prop=eta_bn_prop)
                 n_dev, _ = X_dev.shape
                 if network_architecture['n_labels'] > 0:
+                    dev_predictions,_,_ = predict_labels(model, X_dev, C_dev, eta_bn_prop=eta_bn_prop, task = task)
                     if task == "class":
-                        dev_predictions,_,_ = predict_labels(model, X=X_dev, C=C_dev ,eta_bn_prop=eta_bn_prop, task = task)
-                        dev_task_loss = float(np.sum(dev_predictions == np.argmax(Y_dev, axis=1))) / float(n_dev) # accuracy
+                      dev_task_loss = float(np.sum(dev_predictions == np.argmax(Y_dev, axis=1))) / float(n_dev) # accuracy
                     elif task == "reg":
-                        dev_predictions,_,_ = predict_labels(model, X=X_dev, C=C_dev, Y=Y_dev, eta_bn_prop=eta_bn_prop, task = task)
-                        dev_task_loss = float(np.sum((Y_dev - dev_predictions)**2)) / float(n_dev) # mse
+                      dev_task_loss = float(np.sum((Y_dev - dev_predictions)**2)) / float(n_dev) # mse
                     print("Epoch: {}; Dev perplexity = {:.4f}; Dev {} = {:.4f}".format(epoch, dev_perplexity, task_name, dev_task_loss))
-                    print("validation | y_act (first 10):\n", Y_dev[:10])
-                    print("validation | y_pred (first 10):\n", dev_predictions[:10])
+                    print("validation | y_act (first 10):", Y_dev[:10])
+                    print("validation | y_act (first 10):", dev_predicitons[:10])
                 else:
                     print("Epoch: %d; Dev perplexity = %0.4f" % (epoch, dev_perplexity))
 
@@ -888,7 +878,7 @@ def predict_labels_and_evaluate(model, X, Y, C, output_dir=None, subset='train',
     Predict labels for all instances using the classifier/regression network and evaluate the accuracy/mse
     """
     n_items, vocab_size = X.shape
-    predictions, task_loss, loss = predict_labels(model, X=X, C=C, Y=Y, task=task)
+    predictions, task_loss, loss = predict_labels(model, X, C, task=task)
     if task == "class":
         task_name = "accuracy"
         accuracy = float(np.sum(predictions == np.argmax(Y, axis=1)) / float(n_items))
@@ -909,10 +899,10 @@ def predict_labels_and_evaluate(model, X, Y, C, output_dir=None, subset='train',
             fh.write_list_to_text([str(mse)], os.path.join(output_dir, 'pR2.' + subset + '.txt'))
             
     # save task_loss and loss
-    #df_task_loss = pd.DataFrame(data=task_loss)
-    #df_loss = pd.DataFrame(data=loss)
-    #df_task_loss.to_csv(os.path.join(output_dir, '{}_loss'.format(task_name) + subset + '.csv'))
-    #df_loss.to_csv(os.path.join(output_dir, 'overall_loss_' + subset + '.csv'))
+    df_task_loss = pd.DataFrame(data=task_loss)
+    df_loss = pd.DataFrame(data=loss)
+    df_task_loss.to_csv(os.path.join(output_dir, '{}_loss'.format(task_name) + subset + '.csv'))
+    df_loss.to_csv(os.path.join(output_dir, 'overall_loss_' + subset + '.csv'))
         
     # save actuals and predictions
     df_y = pd.DataFrame(data=Y)
@@ -921,29 +911,7 @@ def predict_labels_and_evaluate(model, X, Y, C, output_dir=None, subset='train',
     df_y_pred.to_csv(os.path.join(output_dir, 'y_predictions_' + subset + '.csv'))
 
 
-    
-def predict_labels_all(model, X, C, eta_bn_prop=0.0, task = None):
-    """
-    Predict a label for each instance using the classifier (or regression) part of the network
-    """    
-    if task=="class":
-        print("prediction task: classification")
-    elif task =="reg":
-        print("prediction task: regression")  
-        # predict probabilities
-        mb_gen_pred = create_minibatch(X=X, C=C, Y=None, batch_size=X.shape[0], rng=False)
-        batch_xs, batch_ys, batch_cs = next(mb_gen_pred)
-        predictions = model.predict_reg(X=batch_xs, C=batch_cs, eta_bn_prop=eta_bn_prop,task="reg")
-        task_losses  = np.nan
-        losses = np.nan
-        #print("opt:", opt)
-        print("y_pred_test (first 10):", predictions[:10])
-        return predictions, task_losses, losses
-    
-    
-
-    
-def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
+def predict_labels(model, X, C, eta_bn_prop=0.0, task = None):
     """
     Predict a label for each instance using the classifier (or regression) part of the network
     """
@@ -956,6 +924,7 @@ def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
         print("prediction task: classification")
     elif task =="reg":
         print("prediction task: regression")
+    
     # predict items one by one
     for i in range(n_items):
         X_i = np.expand_dims(X[i, :], axis=0)
@@ -964,50 +933,35 @@ def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
             C_i = np.expand_dims(C[i, :], axis=0)
         else:
             C_i = None
+
         # predict probabilities
-        if task == "reg":
-            Y_i = Y[i, :].astype('float32').reshape(1,1)
-            pred = model.predict_reg(X=X_i, C=C_i, Y=Y_i, eta_bn_prop=eta_bn_prop,task="reg")
+        if task == "class":
+            theta, y_recon, _, _ = model.predict(X_i, C_i, eta_bn_prop=eta_bn_prop, task=task)
+            # take the label with the maximum predicted probability
+            pred = np.argmax(y_recon)
             predictions[i] = pred
-            task_losses  = np.nan
-            losses = np.nan
-            #print("opt:", opt)
-            print("y_pred_test (first 10):", predictions[:10])
-            return predictions, task_losses, losses
-    #print("task_losses_test (first 10):", task_losses[:10])
-    #print("losses_test (first 10):", losses[:10])
-    
+            task_losses[i] = np.nan
+            losses[i] = np.nan
+        if task == "reg":
+            theta, pred, task_loss, loss = model.predict(X_i, C_i, eta_bn_prop=eta_bn_prop,task=task)
+            predictions[i] = pred
+            task_losses[i] = task_loss
+            losses[i] = loss
+    print("y_pred_test (first 10):", predictions[:10])
+    print("task_losses_test (first 10):", task_losses[:10])
+    print("losses_test (first 10):", losses[:10])
+    return predictions, task_losses, losses
 
 
-def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None, batch_size = 200,output_dir=None):
+def test(model, X, Y, C, eta_bn_prop=0.0, task = None):
     """
     Predict a label for each instance using the classifier (or regression) part of the network
     """
     n_items, vocab_size = X.shape
-    dv = network_architecture['dv']
-    n_topics = network_architecture['n_topics']
-    task = network_architecture['task']
-
-    # create np arrays to store regularization strengths, which we'll update outside of the tensorflow model
-    if regularize:
-        l2_strengths = 0.5 * np.ones([n_topics, dv]) / float(n_train)
-        l2_strengths_c = 0.5 * np.ones([model.beta_c_length, dv]) / float(n_train)
-        l2_strengths_ci = 0.5 * np.ones([model.beta_ci_length, dv]) / float(n_train)
-    else:
-        l2_strengths = np.zeros([n_topics, dv])
-        l2_strengths_c = np.zeros([model.beta_c_length, dv])
-        l2_strengths_ci = np.zeros([model.beta_ci_length, dv])
-
-    obs = 0
-    total_batch = int(n_items / batch_size)
-    print("nr of eval batches", total_batch)
-    print("eval batch size", batch_size)
-
-    eta_bn_prop = init_eta_bn_prop  # interpolation between batch norm and no batch norm in final layer of recon
-    kld_weight = 1.0  # could use this to anneal KLD, but not currently doing so
-
-    # Start evaluation cycle
     predictions = np.zeros(n_items, dtype=int)
+    task_losses = np.zeros(n_items, dtype=int)
+    losses = np.zeros(n_items, dtype=int)
+    
     avg_loss = 0.
     avg_task_loss = 0.
     task_loss = 0.
@@ -1015,66 +969,73 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
         task_name = "accuracy"
     elif task == "reg":
         task_name = "mse"
-    # Loop over all observations one-by-one
-    for i in range(total_batch):
-        # get a minibatch
-        ixs = range(batch_size*i,batch_size*(i+1))
-        obs_xs, obs_ys, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32')
-        #print("val input shapes",obs_xs.shape, obs_ys.shape,obs_cs.shape)
-        # do one update, passing in the data, regularization strengths, and bn
-        loss, task_loss_i, pred = model.eval_test(X=obs_xs, Y=obs_ys, C=obs_cs, l2_strengths=l2_strengths, 
-                                         l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci,
-                                         eta_bn_prop=eta_bn_prop, kld_weight=kld_weight,is_training=False)
+    # predict items one by one
+    for i in range(n_items):
+        Y_i = Y[i]
+        X_i = np.expand_dims(X[i, :], axis=0)
+        # optionally provide covariates
+        if C is not None:
+            C_i = np.expand_dims(C[i, :], axis=0)
+        else:
+            C_i = None
+        # optain the prediction
+        loss, task_loss_i, pred = model.predict_reg(X_i, C_i, eta_bn_prop=eta_bn_prop, task=task)
         # compute accuracy/mse on prediction
         if network_architecture['n_labels'] > 0 and task == "class":
-            task_loss += np.sum(pred == np.argmax(obs_ys, axis=1)) / float(n_items) # accuracy
+            task_loss += np.sum(pred == np.argmax(batch_ys, axis=1)) / float(n_items) # accuracy
         elif network_architecture['n_labels'] > 0 and task == "reg":
-            task_loss += np.sum((obs_ys - pred)**2) / float(n_items) # mse
+            task_loss += np.sum((batch_ys - pred)**2) / float(n_train) # mse
         # Compute average loss
-        avg_loss += loss / n_items
-        avg_task_loss += task_loss_i / n_items
-        predictions[ixs] = np.squeeze(pred)
-        obs += 1
+        avg_loss += loss / n_train * batch_size
+        avg_task_loss += task_loss_i / n_train * batch_size
+        batches += 1
         if np.isnan(avg_loss):
-            print(i, np.sum(obs_xs, 1).astype(np.int), obs_xs.shape)
-            print('Encountered NaN, stopping evaluation. Please check the learning_rate settings and the momentum.')
+            print(epoch, i, np.sum(batch_xs, 1).astype(np.int), batch_xs.shape)
+            print('Encountered NaN, stopping training. Please check the learning_rate settings and the momentum.')
             # return vae,emb
             sys.exit()
 
-        # Display logs per observations step
-        if i % display_step == 0:
-            if network_architecture['n_labels'] > 0:
-                print("EVAL | ","until obs:", '%d' % i, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; eval {} so far (noisy) =".format(task_name), "{:.9f}".format(task_loss))
-                if batch_size > 1:
-                    print("EVAL | y_act (i):\n", obs_ys[:10])
-                    print("EVAL | y_pred (i):\n", pred[:10])
-                else:
-                    print("EVAL | y_act (i):\n", obs_ys)
-                    print("EVAL | y_pred (i):\n", pred)
-            else:
-                print("EVAL | ", "Obs:", '%d' % i, "loss=", "{:.9f}".format(avg_loss))
+    # update weight prior variances using current weight values
+    if regularize:
+        weights = model.get_weights()
+        weights_sq = weights ** 2
+        # avoid infinite regularization
+        weights_sq[weights_sq < min_weights_sq] = min_weights_sq
+        l2_strengths = 0.5 / weights_sq / float(n_train)
 
-    # Eval perplexity
-    eval_perplexity = evaluate_perplexity(model, X, Y, C, eta_bn_prop=eta_bn_prop)
-    print("EVAL | perplexity = %0.4f" % (eval_perplexity))
-    print("EVAL | {}:".format(task_name),task_loss)
-    print("EVAL | avg. loss:",avg_loss)
-    # only for mse 
-    pR = 1-(task_loss/np.var(Y))
-    print("R^2 on labels = %0.4f" % pR )
-    print("variance of y:", np.var(Y))
-    # save the results to file
-    if output_dir is not None:
-        fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, 'mse.txt'))
-        fh.write_list_to_text([str(pR)], os.path.join(output_dir, 'pR2.txt'))
-    # save actuals and predictions
-    df_y = pd.DataFrame(data=Y)
-    df_y_pred = pd.DataFrame(data=predictions)
-    df_y.to_csv(os.path.join(output_dir, 'y_actuals_.csv'))
-    df_y_pred.to_csv(os.path.join(output_dir, 'y_predictions_.csv'))
-    
-    return predictions, task_loss, avg_loss, avg_task_loss, eval_perplexity
-    
+        if network_architecture['n_covariates'] > 0:
+            weights = model.get_covar_weights()
+            weights_sq = weights ** 2
+            # avoid infinite regularization
+            weights_sq[weights_sq < min_weights_sq] = min_weights_sq
+            l2_strengths_c = 0.5 / weights_sq / float(n_train)
+            if network_architecture['use_covar_interactions']:
+                weights = model.get_covar_inter_weights()
+                weights_sq = weights ** 2
+                # avoid infinite regularization
+                weights_sq[weights_sq < min_weights_sq] = min_weights_sq
+                l2_strengths_ci = 0.5 / weights_sq / float(n_train)
+
+    # Display logs per epoch step
+    if epoch % display_step == 0 and epoch > 0:
+        if network_architecture['n_labels'] > 0:
+            print("Epoch:", '%d' % epoch, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; training {} (noisy) =".format(task_name), "{:.9f}".format(task_loss))
+        else:
+            print("Epoch:", '%d' % epoch, "loss=", "{:.9f}".format(avg_loss))
+
+        if X_dev is not None:
+            dev_perplexity = evaluate_perplexity(model, X_dev, Y_dev, C_dev, eta_bn_prop=eta_bn_prop)
+            n_dev, _ = X_dev.shape
+            if network_architecture['n_labels'] > 0:
+                dev_predictions = predict_labels(model, X_dev, C_dev, eta_bn_prop=eta_bn_prop, task = task)
+                if task == "class":
+                  dev_task_loss = float(np.sum(dev_predictions == np.argmax(Y_dev, axis=1))) / float(n_dev) # accuracy
+                elif task == "reg":
+                  dev_task_loss = float(np.sum((Y_dev - dev_predictions)**2)) / float(n_dev) # mse
+                print("Epoch: {}; Dev perplexity = {:.4f}; Dev {} = {:.4f}".format(epoch, dev_perplexity, task_name, dev_task_loss))
+            else:
+                print("Epoch: %d; Dev perplexity = %0.4f" % (epoch, dev_perplexity))
+
     
     
 if __name__ == '__main__':

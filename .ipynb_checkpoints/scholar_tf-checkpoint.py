@@ -149,6 +149,48 @@ class Scholar(object):
         # initialize word embeddings
         if init_embeddings is not None:
             self.sess.run(self.network_weights['embeddings'].assign(init_embeddings))
+            
+
+    def regression(self):        
+        n_labels = self.network_architecture['n_labels']
+        dh = self.network_architecture['n_topics']
+        regression_layers = self.network_architecture['regression_layers']
+            
+        if self.network_architecture['covars_in_downstream_task']:
+            regression_input = tf.concat([self.theta, self.c], axis=1)
+        else:
+            regression_input = self.theta
+            
+        if regression_layers == 0:
+            self.pred_y = tf.add(tf.matmul(regression_input,self.reg_weights), self.reg_bias)
+        else:
+            raise ValueError(" multilayer regression network not yet set up")
+        return self.pred_y
+
+    
+    def _regression_network(self):
+        n_labels = self.network_architecture['n_labels']
+        dh = self.network_architecture['n_topics']
+        regression_layers = self.network_architecture['regression_layers']     
+        
+        if self.network_architecture['covars_in_downstream_task']:
+            regression_input = tf.concat([self.theta, self.c], axis=1)
+        else:
+            regression_input = self.theta
+        if regression_layers == 0:
+            self.pred_y = slim.layers.linear(regression_input, n_labels, scope='pred_y')
+        elif regression_layers == 1:
+            reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
+            reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
+            self.pred_y = slim.layers.linear(reg0_sp, n_labels, scope='pred_y')
+        else:
+            reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
+            reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
+            reg1 = slim.layers.linear(reg0_sp, dh, scope='reg1')
+            reg1_sp = tf.nn.softplus(reg1, name='reg1_softplus')
+            self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
+        return self.pred_y
+
 
     def _create_network(self):
         encoder_layers = self.network_architecture['encoder_layers']
@@ -164,6 +206,12 @@ class Scholar(object):
         regression_layers = self.network_architecture['regression_layers']
 
         self.network_weights = self._initialize_weights()
+        
+        # create placeholders for regression network
+        with tf.variable_scope('regnet') as scope:
+            self.reg_weights = tf.Variable(np.random.normal(size=(dh+n_covariates,1)), name='reg_W',dtype=tf.float32)
+            self.reg_bias = tf.Variable(np.random.normal(), name='reg_b',dtype=tf.float32)  
+        
 
         # create the first layer of the encoder
         encoder_parts = []
@@ -268,43 +316,10 @@ class Scholar(object):
         self.x_recon_no_bn = tf.nn.softmax(eta)
 
         # predict labels using theta and (optionally) covariates
-        if n_labels > 0 and self.task == "class":
-            if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
-                classifier_input = tf.concat([self.theta, c_emb], axis=1)
-            else:
-                classifier_input = self.theta
-            if classifier_layers == 0:
-                decoded_y = slim.layers.linear(classifier_input, n_labels, scope='y_decoder')
-            elif classifier_layers == 1:
-                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
-                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
-                decoded_y = slim.layers.linear(cls0_sp, n_labels, scope='y_decoder')
-            else:
-                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
-                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
-                cls1 = slim.layers.linear(cls0_sp, dh, scope='cls1')
-                cls1_sp = tf.nn.softplus(cls1, name='cls1_softplus')
-                decoded_y = slim.layers.linear(cls1_sp, n_labels, scope='y_decoder')
-            self.y_recon = tf.nn.softmax(decoded_y, name='y_recon')
-            self.pred_y = tf.argmax(self.y_recon, axis=1, name='pred_y')
-            
-        elif n_labels > 0 and self.task == "reg":
-            if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
-                regression_input = tf.concat([self.theta, c_emb], axis=1)
-            else:
-                regression_input = self.theta
-            if regression_layers == 0:
-                self.pred_y = slim.layers.linear(regression_input, n_labels, scope='pred_y')
-            elif regression_layers == 1:
-                reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
-                reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
-                self.pred_y = slim.layers.linear(reg0_sp, n_labels, scope='pred_y')
-            else:
-                reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
-                reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
-                reg1 = slim.layers.linear(reg0_sp, dh, scope='reg1')
-                reg1_sp = tf.nn.softplus(reg1, name='reg1_softplus')
-                self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
+        if n_covariates > 0:
+            predy_reg = self._regression_network()
+            #predy_reg = self.regression()
+
             
 
     def _initialize_weights(self):
@@ -350,14 +365,15 @@ class Scholar(object):
         # compute the negative log loss
         self.NL_x = -tf.reduce_sum(self.x * tf.log(x_recon), 1)
 
-        if self.network_architecture['n_labels'] > 0 and self.task == "class":
+        #if self.network_architecture['n_labels'] > 0 and self.task == "class":
             # loss for categortical labels
             # TODO: add losses for other types of labels
-            NL_y = -tf.reduce_sum(self.y * tf.log(self.y_recon+1e-10), 1)  # cross-entropy
-            self.task_loss = tf.reduce_mean(NL_y)
-            self.NL = tf.add(self.NL_x, NL_y)
+        #    NL_y = -tf.reduce_sum(self.y * tf.log(self.y_recon+1e-10), 1)  # cross-entropy
+        #    self.task_loss = tf.reduce_mean(NL_y)
+        #    self.NL = tf.add(self.NL_x, NL_y)
             
-        elif self.network_architecture['n_labels'] > 0 and self.task == "reg":
+        #if self.network_architecture['n_labels'] > 0 and self.task == "reg":
+        if self.network_architecture['n_labels'] > 0:
             # loss for regression (MSE)
             NL_y = tf.reduce_sum(tf.squared_difference(self.y, self.pred_y),1) # mse
             self.task_loss = tf.reduce_mean(NL_y)
@@ -428,25 +444,51 @@ class Scholar(object):
             pred = -1
         return loss, task_loss, pred
     
-
-    def predict_reg(self, X, C, eta_bn_prop=0.0, task=None):
+    
+    def eval_test(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8,is_training=False):
+        """
+        Evaluate the model
+        """
+        batch_size = self.get_batch_size(X)
+        theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
+        if Y is not None:
+            loss, task_loss, pred = self.sess.run((self.loss, self.task_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input,self.is_training: is_training})
+        else:
+            loss = self.sess.run((self.loss), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: keep_prob, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input, self.is_training: is_training})
+            task_loss = 0
+            pred = -1
+        return loss, task_loss, pred
+    
+    def predict_reg(self, X, C, Y, eta_bn_prop=0.0, task=None): 
         """
         Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
         """
-        # set all regularization strenghts to be zero, since we don't care about topic reconstruction here
         l2_strengths = np.zeros(self.network_weights['beta'].shape)
         l2_strengths_c = np.zeros(self.network_weights['beta_c'].shape)
-        l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape)
-        # input a vector of all zeros in place of the labels that the model has been trained on
-        Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')        
+        l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape) 
+        Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
+        #Y = np.ones((1, self.network_architecture['n_labels'])).astype('float32')
+        batch_size = self.get_batch_size(X)
+        theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
+        if Y is not None:
+            pred, theta = self.sess.run((self.pred_y, self.theta), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop, self.is_training: False})
+        return pred
+        
+        
+    def pred_reg_alt(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8, task=None):
+        """
+        Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
+        """
+        # set all regularization strenghts to be zero, since we don't care about topic reconstruction here 
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
         
-        loss, task_loss, pred = self.sess.run((self.loss, self.task_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop, self.task: task})
-        return loss, task_loss, pred
+        loss, task_loss, pred = self.sess.run((self.loss, self.task_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
+        return pred
     
 
-    def predict(self, X, C, eta_bn_prop=0.0, task=None):
+    #def predict(self, X, C, eta_bn_prop=0.0, task=None):
+    def predict(self, X, C, Y, eta_bn_prop=0.0, task=None):
         """
         Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
         """
@@ -454,17 +496,18 @@ class Scholar(object):
         l2_strengths = np.zeros(self.network_weights['beta'].shape)
         l2_strengths_c = np.zeros(self.network_weights['beta_c'].shape)
         l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape)
-        # input a vector of all zeros in place of the labels that the model has been trained on
-        Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
         
         if task == "class":
+            # input a vector of all zeros in place of the labels that the model has been trained on
+            Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
             theta, pred = self.sess.run((self.theta, self.y_recon), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop, self.task: task})
-            return theta, pred, _ , _
+            return theta, pred, _ , _, _
         elif task == "reg":
-            loss, task_loss, theta, pred = self.sess.run((self.theta, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
-            return theta, pred, task_loss, loss
+            opt , loss, task_loss, theta, pred = self.sess.run((self.optimizer, self.loss, self.task_loss, self.pred_y, self.theta), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
+            #return theta, pred, task_loss, loss, opt
+            return theta, pred, task_loss, loss, opt
                                                                                                                     
 
     def predict_from_topics(self, theta, C=None):

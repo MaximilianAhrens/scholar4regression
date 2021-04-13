@@ -1024,7 +1024,7 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
         # do one update, passing in the data, regularization strengths, and bn
         loss, task_loss_i, pred = model.eval_test(X=obs_xs, Y=obs_ys, C=obs_cs, l2_strengths=l2_strengths, 
                                          l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci,
-                                         eta_bn_prop=eta_bn_prop, kld_weight=kld_weight,is_training=False)
+                                         eta_bn_prop=eta_bn_prop, kld_weight=kld_weight)
         # compute accuracy/mse on prediction
         if network_architecture['n_labels'] > 0 and task == "class":
             task_loss += np.sum(pred == np.argmax(obs_ys, axis=1)) / float(n_items) # accuracy
@@ -1067,11 +1067,6 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
     if output_dir is not None:
         fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, 'mse.txt'))
         fh.write_list_to_text([str(pR)], os.path.join(output_dir, 'pR2.txt'))
-    # save actuals and predictions
-    df_y = pd.DataFrame(data=Y)
-    df_y_pred = pd.DataFrame(data=predictions)
-    df_y.to_csv(os.path.join(output_dir, 'y_actuals_.csv'))
-    df_y_pred.to_csv(os.path.join(output_dir, 'y_predictions_.csv'))
     
     return predictions, task_loss, avg_loss, avg_task_loss, eval_perplexity
     

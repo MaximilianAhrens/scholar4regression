@@ -150,6 +150,27 @@ class Scholar(object):
         if init_embeddings is not None:
             self.sess.run(self.network_weights['embeddings'].assign(init_embeddings))
             
+            
+    def _classifier_network(self):
+        if n_labels > 0 and self.task == "class":
+            if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
+                classifier_input = tf.concat([self.theta, c_emb], axis=1)
+            else:
+                classifier_input = self.theta
+            if classifier_layers == 0:
+                decoded_y = slim.layers.linear(classifier_input, n_labels, scope='y_decoder')
+            elif classifier_layers == 1:
+                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
+                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
+                decoded_y = slim.layers.linear(cls0_sp, n_labels, scope='y_decoder')
+            else:
+                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
+                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
+                cls1 = slim.layers.linear(cls0_sp, dh, scope='cls1')
+                cls1_sp = tf.nn.softplus(cls1, name='cls1_softplus')
+                decoded_y = slim.layers.linear(cls1_sp, n_labels, scope='y_decoder')
+            #self.y_recon = tf.nn.softmax(decoded_y, name='y_recon')
+            #self.pred_y = tf.argmax(self.y_recon, axis=1, name='pred_y')
 
     def regression(self):        
         n_labels = self.network_architecture['n_labels']
@@ -317,8 +338,17 @@ class Scholar(object):
 
         # predict labels using theta and (optionally) covariates
         if n_covariates > 0:
-            predy_reg = self._regression_network()
+            #predy_reg = self._regression_network()
             #predy_reg = self.regression()
+            if self.network_architecture['covars_in_downstream_task']:
+                regression_input = tf.concat([self.theta, c_emb], axis=1)
+            else:
+                regression_input = self.theta
+            if regression_layers == 0:
+                self.pred_y = tf.add(tf.matmul(regression_input,self.reg_weights), self.reg_bias)
+            else:
+                raise ValueError(" multilayer regression network not yet set up")
+            return self.pred_y
 
             
 
@@ -444,22 +474,7 @@ class Scholar(object):
             pred = -1
         return loss, task_loss, pred
     
-    
-    def eval_test(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8,is_training=False):
-        """
-        Evaluate the model
-        """
-        batch_size = self.get_batch_size(X)
-        theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
-        if Y is not None:
-            loss, task_loss, pred = self.sess.run((self.loss, self.task_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input,self.is_training: is_training})
-        else:
-            loss = self.sess.run((self.loss), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: keep_prob, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input, self.is_training: is_training})
-            task_loss = 0
-            pred = -1
-        return loss, task_loss, pred
-    
-    def predict_reg(self, X, C, Y, eta_bn_prop=0.0, task=None): 
+    def predict_reg(self, X, C, eta_bn_prop=0.0, task=None): 
         """
         Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
         """
@@ -467,7 +482,6 @@ class Scholar(object):
         l2_strengths_c = np.zeros(self.network_weights['beta_c'].shape)
         l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape) 
         Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
-        #Y = np.ones((1, self.network_architecture['n_labels'])).astype('float32')
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
         if Y is not None:
@@ -475,15 +489,20 @@ class Scholar(object):
         return pred
         
         
-    def pred_reg_alt(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8, task=None):
+
+    def predict_reg_old(self, X, C, eta_bn_prop=0.0, task=None):
         """
         Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
         """
-        # set all regularization strenghts to be zero, since we don't care about topic reconstruction here 
+        # set all regularization strenghts to be zero, since we don't care about topic reconstruction here
+        l2_strengths = np.zeros(self.network_weights['beta'].shape)
+        l2_strengths_c = np.zeros(self.network_weights['beta_c'].shape)
+        l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape) 
+        Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
         
-        loss, task_loss, pred = self.sess.run((self.loss, self.task_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
+        pred = self.sess.run((self.pred_y), feed_dict={self.x: X, self.c: C, self.y: Y, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
         return pred
     
 
