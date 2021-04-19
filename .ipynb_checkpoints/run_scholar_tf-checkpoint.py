@@ -87,6 +87,8 @@ def main():
                       help='Number of layers in (generative) regression [0|1|2]: default=%default')
     parser.add_option('--task', dest='task', default="reg",
                       help='Select downstream task: either "class" or "reg".')
+    parser.add_option('--reg-intercept', dest='reg_intercept', default=True,
+                      help='Whether final regression layer has a bias term.')
     parser.add_option('--td-shuffle', dest='train_dev_shuffle', default=False,
                       help='Whether to shuffle the training data for the train-dev split.')
 
@@ -129,6 +131,7 @@ def main():
     seed = options.seed
     regression_layers = options.regression_layers
     task = options.task
+    reg_intercept = options.reg_intercept
     train_dev_shuffle = options.train_dev_shuffle
     
     threads = int(options.threads)
@@ -223,7 +226,7 @@ def main():
     network_architecture = make_network(dv, encoder_layers, embedding_dim,
                                         n_topics, encoder_shortcuts, label_type, n_labels, label_emb_dim,
                                         covariates_type, n_covariates, covar_emb_dim, use_covar_interactions,
-                                        classifier_layers, covars_in_downstream_task, regression_layers, task)  # make_network()
+                                        classifier_layers, covars_in_downstream_task, regression_layers, task=task, reg_intercept=reg_intercept)  # make_network()
 
     print("Network architecture:")
     for key, val in network_architecture.items():
@@ -266,7 +269,13 @@ def main():
 
     # create output directory
     fh.makedirs(output_dir)
-
+    
+    # get regression weights
+    if task =="reg":
+        W, b = model.get_reg_weights()
+        fh.write_list_to_text([str(W)], os.path.join(output_dir, 'regression_weights.txt'))
+        fh.write_list_to_text([str(b)], os.path.join(output_dir, 'regression_bias.txt'))
+        
     # print background
     bg = model.get_bg()
     if not no_bg:
@@ -306,20 +315,19 @@ def main():
             print("sparsity in covariate interactions = %0.4f" % sparsity)
             print("Combined covariates and interactions:")
             
-        """
         if covar_emb_dim > 0:
             print_covariate_embeddings(model, covariate_names, output_dir)
-
-    # Evaluate perplexity on dev and test data
-    if dev_X is not None:
-        perplexity = evaluate_perplexity(model, dev_X, dev_labels, dev_covariates, eta_bn_prop=0.0, n_samples=test_samples)
-        print("Dev perplexity = %0.4f" % perplexity)
-        fh.write_list_to_text([str(perplexity)], os.path.join(output_dir, 'perplexity.dev.txt'))
-
-    if test_X is not None:
-        perplexity = evaluate_perplexity(model, test_X, test_labels, test_covariates, eta_bn_prop=0.0, n_samples=test_samples)
-        print("Test perplexity = %0.4f" % perplexity)
-        fh.write_list_to_text([str(perplexity)], os.path.join(output_dir, 'perplexity.test.txt'))
+            
+    # evaluate accuracy/mse on labels
+    if n_labels > 0:
+        print("Model evaluation - validation set")
+        print("Predicting labels")
+        if dev_folds > 0:
+            dev_predictions, dev_task_loss, dev_avg_loss, dev_avg_task_loss, dev_eval_perplexity = test(model = model, network_architecture = network_architecture, X=dev_X, Y=dev_labels, C=dev_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = batch_size, output_dir = output_dir, subset ="dev_eval", task = task)
+        
+        print("Model evaluation - test set")
+        print("Predicting labels")
+        test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_eval_perplexity = test(model=model, network_architecture=network_architecture, X=test_X, Y=test_labels, C=test_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = batch_size, output_dir = output_dir, subset ="test_eval", task = task)
 
     # evaluate accuracy on covariates (if categorical)
     if n_covariates > 0 and covariates_type == 'categorical' and infer_covars:
@@ -343,31 +351,8 @@ def main():
             print("Test accuracy on covariates = %0.4f" % accuracy)
             if output_dir is not None:
                 fh.write_list_to_text([str(accuracy)], os.path.join(output_dir, 'accuracy.test.txt'))
-        """
 
-    # evaluate accuracy/mse on labels
-    if n_labels > 0:
-        # train the model
-        print("Model evaluation and testing")
-        print("Predicting labels")
-        train_predictions, train_task_loss, train_avg_loss, train_avg_task_loss, train_eval_perplexity = test(model = model, network_architecture = network_architecture, X=train_X, Y=train_labels, C=train_covariates, regularize=auto_regularize, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal, batch_size = batch_size, output_dir = output_dir, subset ="train_eval", task = task)
-        
-        test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_eval_perplexity = test(model=model, network_architecture=network_architecture, X=test_X, Y=test_labels, C=test_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = batch_size, output_dir = output_dir, subset ="test_eval", task = task)
-        
-        #train_predictions, train_task_loss, train_avg_loss, train_avg_task_loss, train_eval_perplexity = test(model = model, network_architecture = network_architecture, X=train_X, Y=train_labels, C=train_covariates, regularize=auto_regularize, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal, batch_size = train_X.shape[0], output_dir = output_dir, subset ="train_eval")
-        
-        #test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_eval_perplexity = test(model=model, network_architecture=network_architecture, X=test_X, Y=test_labels, C=test_covariates, regularize=auto_regularize, bn_anneal=bn_anneal, batch_size = train_X.shape[0], output_dir = output_dir, subset ="test_eval")
-        
-        
-        # dev
-        #predict_labels_and_evaluate(model, train_X, train_labels, train_covariates, output_dir, subset='train', task = task)
-
-        #if dev_X is not None:
-        #    predict_labels_and_evaluate(model, dev_X, dev_labels, dev_covariates, output_dir, subset='dev', task = task)
-
-        #if test_X is not None:
-        #    predict_labels_and_evaluate(model, test_X, test_labels, test_covariates, output_dir, subset='test', task = task)
-    
+                
     # Print associations between topics and labels
     if n_labels > 0 and task == "class":
         all_probs = np.zeros([n_topics, n_labels])
@@ -563,7 +548,7 @@ def create_minibatch(X, Y, C, batch_size=200, rng=None):
             yield X[ixs, :].astype('float32'), None, None
 
 
-def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_downstream_task=True, regression_layers = 0, task = "class"):
+def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_downstream_task=True, regression_layers = 0, task = "reg", reg_intercept=True):
     """
     Combine the network configuration parameters into a dictionary
     """
@@ -584,7 +569,8 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
              classifier_layers=classifier_layers,
              regression_layers=regression_layers,
              covars_in_downstream_task=covars_in_downstream_task,
-             task=task
+             task=task,
+             reg_intercept = reg_intercept,
              )
     return network_architecture
 
@@ -672,26 +658,33 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
         if epoch % display_step == 0 and epoch > 0:
             if network_architecture['n_labels'] > 0:
                 print("Epoch:", '%d' % epoch, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; training {} (noisy) =".format(task_name), "{:.9f}".format(task_loss))
-                print("training | y_act (first 10):\n", batch_ys[:10])
-                print("training | y_pred (first 10):\n", pred[:10])
+                print("training | y_act (first 3):\n", batch_ys[:3])
+                print("training | y_pred (first 3):\n", pred[:3])
             else:
                 print("Epoch:", '%d' % epoch, "loss=", "{:.9f}".format(avg_loss))
 
+            """
+            # TODO: implement early stopping for training based on dev set.
             if X_dev is not None:
                 dev_perplexity = evaluate_perplexity(model, X_dev, Y_dev, C_dev, eta_bn_prop=eta_bn_prop)
                 n_dev, _ = X_dev.shape
                 if network_architecture['n_labels'] > 0:
                     if task == "class":
-                        dev_predictions,_,_ = predict_labels(model, X=X_dev, C=C_dev ,eta_bn_prop=eta_bn_prop, task = task)
-                        dev_task_loss = float(np.sum(dev_predictions == np.argmax(Y_dev, axis=1))) / float(n_dev) # accuracy
+                        dev_predictions,_,_ = predict_labels(model, X=X_dev, 
+                        C=C_dev ,eta_bn_prop=eta_bn_prop, task = task)
+                        dev_task_loss = float(np.sum(dev_predictions == np.argmax(
+                        Y_dev, axis=1))) / float(n_dev) # accuracy
                     elif task == "reg":
-                        dev_predictions,_,_ = predict_labels(model, X=X_dev, C=C_dev, Y=Y_dev, eta_bn_prop=eta_bn_prop, task = task)
+                        dev_predictions,_,_ = predict_labels(model, X=X_dev, C=C_dev,
+                        Y=Y_dev, eta_bn_prop=eta_bn_prop, task = task)
                         dev_task_loss = float(np.sum((Y_dev - dev_predictions)**2)) / float(n_dev) # mse
-                    print("Epoch: {}; Dev perplexity = {:.4f}; Dev {} = {:.4f}".format(epoch, dev_perplexity, task_name, dev_task_loss))
-                    print("validation | y_act (first 10):\n", Y_dev[:10])
-                    print("validation | y_pred (first 10):\n", dev_predictions[:10])
+                    print("Epoch: {}; Dev perplexity = {:.4f}; Dev {} = {:.4f}".format(
+                    epoch, dev_perplexity, task_name, dev_task_loss))
+                    print("validation | y_act (first 3):\n", Y_dev[:3])
+                    print("validation | y_pred (first 3):\n", dev_predictions[:3])
                 else:
                     print("Epoch: %d; Dev perplexity = %0.4f" % (epoch, dev_perplexity))
+            """
 
         # anneal eta_bn_prop from 1 to 0 over the course of training
         if bn_anneal:
@@ -699,6 +692,10 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                 eta_bn_prop -= 1.0 / float(training_epochs*0.75)
                 if eta_bn_prop < 0:
                     eta_bn_prop = 0.0
+                    
+        # save model
+        #model.save_model()
+        #saver.save(model.sess, model_path)
 
     return model
 
@@ -889,66 +886,7 @@ def print_covariate_embeddings(model, covariate_names, output_dir):
     np.savez(os.path.join(output_dir, 'covar_emb.npz'), W=covar_embeddings, names=covariate_names)
 
 
-def predict_labels_and_evaluate(model, X, Y, C, output_dir=None, subset='train', task = None):
-    """
-    Predict labels for all instances using the classifier/regression network and evaluate the accuracy/mse
-    """
-    n_items, vocab_size = X.shape
-    predictions, task_loss, loss = predict_labels(model, X=X, C=C, Y=Y, task=task)
-    if task == "class":
-        task_name = "accuracy"
-        accuracy = float(np.sum(predictions == np.argmax(Y, axis=1)) / float(n_items))
-        print(subset, "accuracy on labels = %0.4f" % accuracy)
-        # save the results to file
-        if output_dir is not None:
-            fh.write_list_to_text([str(accuracy)], os.path.join(output_dir, 'accuracy.' + subset + '.txt'))
-    if task == "reg":
-        task_name ="mse"
-        mse = float(np.sum((Y - predictions)**2)) / float(n_items)
-        pR = 1-(mse/np.var(Y))
-        print(subset, "mse on labels = %0.4f" % mse)
-        print(subset, "R^2 on labels = %0.4f" % pR )
-        print("variance of y:", np.var(Y))
-        # save the results to file
-        if output_dir is not None:
-            fh.write_list_to_text([str(mse)], os.path.join(output_dir, 'mse.' + subset + '.txt'))
-            fh.write_list_to_text([str(mse)], os.path.join(output_dir, 'pR2.' + subset + '.txt'))
-            
-    # save task_loss and loss
-    #df_task_loss = pd.DataFrame(data=task_loss)
-    #df_loss = pd.DataFrame(data=loss)
-    #df_task_loss.to_csv(os.path.join(output_dir, '{}_loss'.format(task_name) + subset + '.csv'))
-    #df_loss.to_csv(os.path.join(output_dir, 'overall_loss_' + subset + '.csv'))
-        
-    # save actuals and predictions
-    df_y = pd.DataFrame(data=Y)
-    df_y_pred = pd.DataFrame(data=predictions)
-    df_y.to_csv(os.path.join(output_dir, 'y_actuals_' + subset + '.csv'))
-    df_y_pred.to_csv(os.path.join(output_dir, 'y_predictions_' + subset + '.csv'))
 
-
-    
-def predict_labels_all(model, X, C, eta_bn_prop=0.0, task = None):
-    """
-    Predict a label for each instance using the classifier (or regression) part of the network
-    """    
-    if task=="class":
-        print("prediction task: classification")
-    elif task =="reg":
-        print("prediction task: regression")  
-        # predict probabilities
-        mb_gen_pred = create_minibatch(X=X, C=C, Y=None, batch_size=X.shape[0], rng=False)
-        batch_xs, batch_ys, batch_cs = next(mb_gen_pred)
-        predictions = model.predict_reg(X=batch_xs, C=batch_cs, eta_bn_prop=eta_bn_prop,task="reg")
-        task_losses  = np.nan
-        losses = np.nan
-        #print("opt:", opt)
-        print("y_pred_test (first 10):", predictions[:10])
-        return predictions, task_losses, losses
-    
-    
-
-    
 def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
     """
     Predict a label for each instance using the classifier (or regression) part of the network
@@ -978,14 +916,12 @@ def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
             task_losses  = np.nan
             losses = np.nan
             #print("opt:", opt)
-            print("y_pred_test (first 10):", predictions[:10])
+            print("y_pred_test (first 3):", predictions[:3])
             return predictions, task_losses, losses
-    #print("task_losses_test (first 10):", task_losses[:10])
-    #print("losses_test (first 10):", losses[:10])
     
 
 
-def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None, batch_size = 200,output_dir=None, subset=None, task = None):
+def test(model, network_architecture, X, Y, C, display_step= 200, min_weights_sq=1e-7, regularize=False, bn_anneal=True, init_eta_bn_prop=0.0, rng=None, batch_size = 200,output_dir=None, subset=None, task = None):
     """
     Predict a label for each instance using the classifier (or regression) part of the network
     """
@@ -1010,6 +946,8 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
     total_batch = int(n_items / batch_size)
     print("nr of eval batches", total_batch)
     print("eval batch size", batch_size)
+    
+    display_step = int(total_batch*0.2)
 
     eta_bn_prop = init_eta_bn_prop  # interpolation between batch norm and no batch norm in final layer of recon
     kld_weight = 1.0  # could use this to anneal KLD, but not currently doing so
@@ -1083,12 +1021,11 @@ def test(model, network_architecture, X, Y, C, display_step=200, min_weights_sq=
             fh.write_list_to_text([str(pR)], os.path.join(output_dir, subset + '_pR2.txt'))
     # save the results to file
     if output_dir is not None:
-        fh.write_list_to_text([str(pred_series)], os.path.join(output_dir, subset + '_predictions.txt'))
-        fh.write_list_to_text([str(pred)], os.path.join(output_dir, subset + '_lastred.txt'))
-    # save actuals and predictions
-    y_series = pd.DataFrame(Y)
-    y_series.to_csv(os.path.join(output_dir, subset + '_y_actuals.csv'))
-    pred_series.to_csv(os.path.join(output_dir, subset + '_y_predictions.csv'))
+        fh.write_list_to_text([str(eval_perplexity)], os.path.join(output_dir, subset + '_perplexity.txt'))
+        # save actuals and predictions
+        y_series = pd.DataFrame(Y)
+        y_series.to_csv(os.path.join(output_dir, subset + '_y_actuals.csv'))
+        pred_series.to_csv(os.path.join(output_dir, subset + '_y_predictions.csv'))
     
     return predictions, task_loss, avg_loss, avg_task_loss, eval_perplexity
     

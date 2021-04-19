@@ -57,6 +57,7 @@ class Scholar(object):
         use_covar_interactions = network_architecture['use_covar_interactions']
         dv = network_architecture['dv']
         self.task = network_architecture["task"]
+        self.reg_intercept = network_architecture["reg_intercept"]
 
         self.regularize = regularize
 
@@ -149,25 +150,27 @@ class Scholar(object):
         # initialize word embeddings
         if init_embeddings is not None:
             self.sess.run(self.network_weights['embeddings'].assign(init_embeddings))
-            
-
-    def regression(self):        
-        n_labels = self.network_architecture['n_labels']
-        dh = self.network_architecture['n_topics']
-        regression_layers = self.network_architecture['regression_layers']
-            
-        if self.network_architecture['covars_in_downstream_task']:
-            regression_input = tf.concat([self.theta, self.c], axis=1)
-        else:
-            regression_input = self.theta
-            
-        if regression_layers == 0:
-            self.pred_y = tf.add(tf.matmul(regression_input,self.reg_weights), self.reg_bias)
-        else:
-            raise ValueError(" multilayer regression network not yet set up")
-        return self.pred_y
-
-    
+          
+    def _classifier_network(self):
+            if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
+                classifier_input = tf.concat([self.theta, c_emb], axis=1)
+            else:
+                classifier_input = self.theta
+            if classifier_layers == 0:
+                decoded_y = slim.layers.linear(classifier_input, n_labels, scope='y_decoder')
+            elif classifier_layers == 1:
+                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
+                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
+                decoded_y = slim.layers.linear(cls0_sp, n_labels, scope='y_decoder')
+            else:
+                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
+                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
+                cls1 = slim.layers.linear(cls0_sp, dh, scope='cls1')
+                cls1_sp = tf.nn.softplus(cls1, name='cls1_softplus')
+                decoded_y = slim.layers.linear(cls1_sp, n_labels, scope='y_decoder')
+            self.y_recon = tf.nn.softmax(decoded_y, name='y_recon')    
+            self.pred_y = tf.argmax(self.y_recon, axis=1, name='pred_y')
+        
     def _regression_network(self):
         n_labels = self.network_architecture['n_labels']
         dh = self.network_architecture['n_topics']
@@ -178,7 +181,11 @@ class Scholar(object):
         else:
             regression_input = self.theta
         if regression_layers == 0:
-            self.pred_y = slim.layers.linear(regression_input, n_labels, scope='pred_y')
+            #self.pred_y = slim.layers.linear(regression_input, n_labels, scope='pred_y')
+            if self.reg_intercept:
+                self.pred_y = tf.add(tf.matmul(regression_input,self.reg_weights), self.reg_bias)
+            else:
+                self.pred_y = tf.matmul(regression_input,self.reg_weights)
         elif regression_layers == 1:
             reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
             reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
@@ -190,7 +197,7 @@ class Scholar(object):
             reg1_sp = tf.nn.softplus(reg1, name='reg1_softplus')
             self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
         return self.pred_y
-
+    
 
     def _create_network(self):
         encoder_layers = self.network_architecture['encoder_layers']
@@ -316,11 +323,11 @@ class Scholar(object):
         self.x_recon_no_bn = tf.nn.softmax(eta)
 
         # predict labels using theta and (optionally) covariates
-        if n_covariates > 0:
+        if n_labels > 0 and self.task == "reg":
             predy_reg = self._regression_network()
-            #predy_reg = self.regression()
+        elif n_labels > 0 and self.task == "class":
+            predy_class, predy_recon = self._classifier_network()
 
-            
 
     def _initialize_weights(self):
         all_weights = dict()
@@ -360,22 +367,22 @@ class Scholar(object):
 
         # Compute an interpolation between reconstruction with and without batchnorm on eta.
         # This is done to allow annealing away from using batchnorm on eta over the course of training
-        x_recon = tf.add(tf.add(tf.multiply(self.eta_bn_prop, self.x_recon), tf.multiply((1.0 - self.eta_bn_prop), self.x_recon_no_bn)), 1e-10)
+        x_recon = tf.add(tf.add(tf.multiply(self.eta_bn_prop, self.x_recon), 
+                                tf.multiply((1.0 - self.eta_bn_prop), self.x_recon_no_bn)), 1e-10)
 
         # compute the negative log loss
         self.NL_x = -tf.reduce_sum(self.x * tf.log(x_recon), 1)
 
-        #if self.network_architecture['n_labels'] > 0 and self.task == "class":
-            # loss for categortical labels
-            # TODO: add losses for other types of labels
-        #    NL_y = -tf.reduce_sum(self.y * tf.log(self.y_recon+1e-10), 1)  # cross-entropy
-        #    self.task_loss = tf.reduce_mean(NL_y)
-        #    self.NL = tf.add(self.NL_x, NL_y)
-            
-        #if self.network_architecture['n_labels'] > 0 and self.task == "reg":
-        if self.network_architecture['n_labels'] > 0:
+        if self.network_architecture['n_labels'] > 0 and self.task=="reg":
             # loss for regression (MSE)
             NL_y = tf.reduce_sum(tf.squared_difference(self.y, self.pred_y),1) # mse
+            self.task_loss = tf.reduce_mean(NL_y)
+            self.NL = tf.add(self.NL_x, NL_y)
+            
+        elif self.network_architecture['n_labels'] > 0 and self.task == "class":
+            # loss for categortical labels
+            # TODO: add losses for other types of labels
+            NL_y = -tf.reduce_sum(self.y * tf.log(self.y_recon+1e-10), 1)  # cross-entropy
             self.task_loss = tf.reduce_mean(NL_y)
             self.NL = tf.add(self.NL_x, NL_y)
             
@@ -445,9 +452,10 @@ class Scholar(object):
         return loss, task_loss, pred
 
     
-    def eval_test(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8,is_training=False):
+    def eval_test(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=0.0, kld_weight=1.0, keep_prob=1.0,is_training=False):
         """
-        Evaluate the model
+        Evaluate the model:
+        Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
         """
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
@@ -459,45 +467,7 @@ class Scholar(object):
             pred = -1
         return loss, task_loss, pred, theta
 
-    
-    
-    def eval_test_stable(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8,is_training=False):
-        """
-        Evaluate the model
-        """
-        batch_size = self.get_batch_size(X)
-        theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
-        if Y is not None:
-            loss, task_loss, pred = self.sess.run((self.loss, self.task_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input,self.is_training: is_training})
-        else:
-            loss = self.sess.run((self.loss), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: keep_prob, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input, self.is_training: is_training})
-            task_loss = 0
-            pred = -1
-        return loss, task_loss, pred
-        
-    #def predict(self, X, C, eta_bn_prop=0.0, task=None):
-    def predict(self, X, C, Y, eta_bn_prop=0.0, task=None):
-        """
-        Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
-        """
-        # set all regularization strenghts to be zero, since we don't care about topic reconstruction here
-        l2_strengths = np.zeros(self.network_weights['beta'].shape)
-        l2_strengths_c = np.zeros(self.network_weights['beta_c'].shape)
-        l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape)
-        batch_size = self.get_batch_size(X)
-        theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
-        
-        if task == "class":
-            # input a vector of all zeros in place of the labels that the model has been trained on
-            Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
-            theta, pred = self.sess.run((self.theta, self.y_recon), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop, self.task: task})
-            return theta, pred, _ , _, _
-        elif task == "reg":
-            opt , loss, task_loss, theta, pred = self.sess.run((self.optimizer, self.loss, self.task_loss, self.pred_y, self.theta), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
-            #return theta, pred, task_loss, loss, opt
-            return theta, pred, task_loss, loss, opt
-                                                                                                                    
-
+                                                                                                                
     def predict_from_topics(self, theta, C=None):
         """
         Predict the probability of labels given a distribution over topics (theta), and covariates (C)
@@ -570,6 +540,15 @@ class Scholar(object):
         decoder_weight = self.network_weights['background']
         bg = self.sess.run(decoder_weight)
         return bg
+    
+    def get_reg_weights(self):
+        """
+        Return the current values of the regression weights
+        """
+        reg_weights = self.reg_weights
+        reg_bias = self.reg_bias
+        W, b = self.sess.run((reg_weights,reg_bias))
+        return W, b
 
     def get_covar_weights(self):
         """
@@ -612,3 +591,6 @@ class Scholar(object):
         else:
             batch_size, _ = X.shape
         return batch_size
+    
+    def save_model(self):
+        self.reg_saver = tf.train.Saver([self.reg_weights, self.reg_bias])
