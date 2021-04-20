@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import tensorflow as tf
 from tensorflow.python.ops import array_ops
 slim = tf.contrib.slim
@@ -24,7 +25,7 @@ class Scholar(object):
                  learning_rate=0.001, batch_size=100, init_embeddings=None, update_embeddings=True,
                  init_bg=None, update_background=True, init_beta=None, update_beta=True,
                  threads=4, regularize=False, optimizer='adam',
-                 adam_beta1=0.99, seed=None):
+                 adam_beta1=0.99, seed=None, output_dir = None):
         """
         :param network_architecture: a dictionary of model configuration parameters (see run_scholar_tf.py)
         :param alpha: hyperparameter for Dirichlet prior on documents (scalar or np.array)
@@ -49,6 +50,7 @@ class Scholar(object):
         self.network_architecture = network_architecture
         self.learning_rate = learning_rate
         self.adam_beta1 = adam_beta1
+        self.output_dir = output_dir
 
         n_topics = network_architecture['n_topics']
         n_labels = network_architecture['n_labels']
@@ -88,7 +90,7 @@ class Scholar(object):
         self.update_background = update_background
         self.update_beta = update_beta
         self.optimizer_type = optimizer
-
+        
         # create a placeholder for train / test inputs
         self.x = tf.placeholder(tf.float32, [None, dv], name='input')  # batch size x vocab matrix of word counts
         if n_labels > 0:
@@ -217,7 +219,10 @@ class Scholar(object):
         # create placeholders for regression network
         with tf.variable_scope('regnet') as scope:
             self.reg_weights = tf.Variable(np.random.normal(size=(dh+n_covariates,1)), name='reg_W',dtype=tf.float32)
-            self.reg_bias = tf.Variable(np.random.normal(), name='reg_b',dtype=tf.float32)  
+            if self.reg_intercept:
+                self.reg_bias = tf.Variable(np.random.normal(), name='reg_b',dtype=tf.float32)  
+            else:
+                self.reg_bias = tf.Variable(0, name='reg_b',dtype=tf.float32)  
         
 
         # create the first layer of the encoder
@@ -591,6 +596,12 @@ class Scholar(object):
         else:
             batch_size, _ = X.shape
         return batch_size
-    
-    def save_model(self):
-        self.reg_saver = tf.train.Saver([self.reg_weights, self.reg_bias])
+
+    def save_model_setup(self):
+        # options for saving the model
+        self.best_acc_saver = tf.train.Saver(max_to_keep=1)
+        self.best_mse_saver = tf.train.Saver(max_to_keep=1)
+        self.recent_saver = tf.train.Saver(max_to_keep=1)
+        self.checkpoint_dir = os.path.abspath(os.path.join(self.output_dir, "checkpoints"))
+        if not os.path.exists(self.checkpoint_dir):
+            os.makedirs(self.checkpoint_dir)
