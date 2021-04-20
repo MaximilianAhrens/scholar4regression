@@ -93,6 +93,11 @@ def main():
                       help='Whether to shuffle the training data for the train-dev split.')
     parser.add_option('--eval-on-fly', action="store_true", dest='test_on_the_fly', default=False,
                       help='Test immediately with best validation model.')
+    parser.add_option('--eval-train', action="store_true", dest='train_eval', default=False,
+                      help='Additionally, evaluate performance on training set.')
+    parser.add_option('--recent-saves', action="store_true", dest='recent_saves', default=False,
+                      help='Save model every 10 epochs.')
+
 
 
     (options, args) = parser.parse_args()
@@ -136,6 +141,8 @@ def main():
     reg_intercept = options.reg_intercept
     test_on_the_fly = options.test_on_the_fly
     train_dev_shuffle = options.train_dev_shuffle
+    train_eval = options.train_eval
+    recent_saves = options.recent_saves
     
     # check validity of boolean inputs
     if isinstance(test_on_the_fly, bool) == False:
@@ -238,7 +245,7 @@ def main():
                                         n_topics, encoder_shortcuts, label_type, n_labels, label_emb_dim,
                                         covariates_type, n_covariates, covar_emb_dim, use_covar_interactions,
                                         classifier_layers, covars_in_downstream_task, regression_layers, task=task, reg_intercept=reg_intercept,
-                                       test_on_the_fly = test_on_the_fly)  # make_network()
+                                       test_on_the_fly = test_on_the_fly, train_eval = train_eval, recent_saves = recent_saves)  # make_network()
 
     print("Network architecture:")
     for key, val in network_architecture.items():
@@ -288,8 +295,8 @@ def main():
     # get regression weights
     if task =="reg":
         W, b = model.get_reg_weights()
-        fh.write_list_to_text([str(W)], os.path.join(output_dir, 'regression_weights.txt'))
-        fh.write_list_to_text([str(b)], os.path.join(output_dir, 'regression_bias.txt'))
+        fh.write_list_to_text([str(W)], os.path.join(output_dir, 'end_of_training_regression_weights.txt'))
+        fh.write_list_to_text([str(b)], os.path.join(output_dir, 'end_of_training_regression_bias.txt'))
         
     # print background
     bg = model.get_bg()
@@ -563,7 +570,7 @@ def create_minibatch(X, Y, C, batch_size=200, rng=None):
             yield X[ixs, :].astype('float32'), None, None
 
 
-def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_downstream_task=True, regression_layers = 0, task = "reg", reg_intercept=True, test_on_the_fly = False):
+def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_downstream_task=True, regression_layers = 0, task = "reg", reg_intercept=True, test_on_the_fly = False, train_eval = False, recent_saves = False):
     """
     Combine the network configuration parameters into a dictionary
     """
@@ -587,6 +594,8 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
              task=task,
              reg_intercept = reg_intercept,
              test_on_the_fly = test_on_the_fly,
+             train_eval = train_eval,
+             recent_saves = recent_saves
              )
     return network_architecture
 
@@ -600,6 +609,8 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
     n_topics = network_architecture['n_topics']
     task = network_architecture['task']
     test_on_the_fly = network_architecture['test_on_the_fly']
+    train_eval = network_architecture['train_eval']
+    recent_saves = network_architecture['recent_saves']
 
     total_batch = int(n_train / batch_size)
 
@@ -621,7 +632,6 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
             task_name = "accuracy"
             best_loss = 0.0
         
-    batches = 0
     eta_bn_prop = init_eta_bn_prop  # interpolation between batch norm and no batch norm in final layer of recon
     kld_weight = 1.0  # could use this to anneal KLD, but not currently doing so
 
@@ -651,13 +661,12 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
             # Compute average loss
             avg_loss += loss / n_train * batch_size
             avg_task_loss += task_loss_i / n_train * batch_size
-            batches += 1
             if np.isnan(avg_loss):
                 print(epoch, i, np.sum(batch_xs, 1).astype(np.int), batch_xs.shape)
                 print('Encountered NaN, stopping training. Please check the learning_rate settings and the momentum.')
                 # return vae,emb
                 sys.exit()
-
+                 
         # update weight prior variances using current weight values
         if regularize:
             weights = model.get_weights()
@@ -682,12 +691,12 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
         # Display logs per epoch step
         if epoch % display_step == 0 and epoch > 0:
             if network_architecture['n_labels'] > 0:
-                print("training | epoch:", '%d' % epoch, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; training {} (noisy) =".format(task_name), "{:.9f}".format(task_loss))
+                print("training | epoch:", '%d' % epoch, "| loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; training {} (noisy) =".format(task_name), "{:.9f}".format(task_loss))
                 #print("training | y_act (first 3):\n", batch_ys[:3])
                 #print("training | y_pred (first 3):\n", pred[:3])
             else:
                 print("training | epoch:", '%d' % epoch, "loss=", "{:.9f}".format(avg_loss))
-                
+         
 
         # early stopping for training based on dev set.  
         if X_dev is not None and network_architecture['n_labels'] > 0:
@@ -703,6 +712,8 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     best_loss = dev_task_loss
                     print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
                     model.best_acc_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_acc={:g}-epoch{}.ckpt'.format(best_loss, epoch))
+                    if train_eval:
+                        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir)
                 else:
                     print("validation | epoch: {0} | last validation {1} = {2}; best validation {1} = {3} ".format(
                         epoch, task_name, round(dev_task_loss,4), round(dev_task_loss,4)))
@@ -711,6 +722,12 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     best_loss = dev_task_loss
                     print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
                     model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_mse={:g}-epoch{}.ckpt'.format(best_loss, epoch))
+                    # save regression coefficients
+                    W, b = model.get_reg_weights()
+                    fh.write_list_to_text([str(W)], os.path.join(output_dir, 'best_val_regression_weights.txt'))
+                    fh.write_list_to_text([str(b)], os.path.join(output_dir, 'best_val_regression_bias.txt'))
+                    if train_eval:
+                        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir)
                     if test_on_the_fly:
                         test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_perplexity = test(model=model, 
                                                                                                                          network_architecture=network_architecture,
@@ -726,10 +743,11 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
             if verbose_updates:
                 print("validation | y_act (first 3):\n", Y_dev[:3])
                 print("validation | y_pred (first 3):\n", dev_predictions[:3])
-            if epoch % 10==0:
-                model.recent_saver.save(model.sess, model.checkpoint_dir + '/recent-model-val_{}={:g}-epoch{}.ckpt'.format(task_name, dev_task_loss, epoch))
 
             
+        if epoch % 10==0 and recent_saves==True:
+            model.recent_saver.save(model.sess, model.checkpoint_dir + '/recent-model-val_{}={:g}-epoch{}.ckpt'.format(task_name, dev_task_loss, epoch))
+
 
         # anneal eta_bn_prop from 1 to 0 over the course of training
         if bn_anneal:
@@ -738,6 +756,10 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                 if eta_bn_prop < 0:
                     eta_bn_prop = 0.0
                     
+
+    if X_dev is None and train_eval==True:
+        # evaluate insample training on last epoch
+        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir)
 
     return model
 
@@ -960,7 +982,20 @@ def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
             #print("opt:", opt)
             print("y_pred_test (first 3):", predictions[:3])
             return predictions, task_losses, losses
-    
+
+
+def evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir):
+    # Training set evaluation
+    train_perplexity = evaluate_perplexity(model, X, Y, C, eta_bn_prop=eta_bn_prop)
+    if output_dir is not None:
+        fh.write_list_to_text([str(train_perplexity)], os.path.join(output_dir, "train" + '_perplexity.txt'))
+    if task == "reg":
+        pR = 1-(task_loss/np.var(Y))
+        #print("{} | R^2 on labels = {:.4f}".format(subset, pR))
+        #print("{} | variance of y:".format(subset), np.var(Y))
+        if output_dir is not None:
+            fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, "train" + '_mse.txt'))
+            fh.write_list_to_text([str(pR)], os.path.join(output_dir, "train" + '_pR2.txt'))
 
 
 def test(model, network_architecture, X, Y, C, display_step= 200, min_weights_sq=1e-7, regularize=False, bn_anneal=True, init_eta_bn_prop=0.0, rng=None, batch_size = 200,output_dir=None, subset=None, task = None, verbose_updates = False, test_set = True):

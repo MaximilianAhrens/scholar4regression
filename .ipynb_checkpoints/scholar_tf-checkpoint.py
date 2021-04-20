@@ -153,33 +153,40 @@ class Scholar(object):
         if init_embeddings is not None:
             self.sess.run(self.network_weights['embeddings'].assign(init_embeddings))
           
-    def _classifier_network(self):
-            if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
-                classifier_input = tf.concat([self.theta, c_emb], axis=1)
-            else:
-                classifier_input = self.theta
-            if classifier_layers == 0:
-                decoded_y = slim.layers.linear(classifier_input, n_labels, scope='y_decoder')
-            elif classifier_layers == 1:
-                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
-                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
-                decoded_y = slim.layers.linear(cls0_sp, n_labels, scope='y_decoder')
-            else:
-                cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
-                cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
-                cls1 = slim.layers.linear(cls0_sp, dh, scope='cls1')
-                cls1_sp = tf.nn.softplus(cls1, name='cls1_softplus')
-                decoded_y = slim.layers.linear(cls1_sp, n_labels, scope='y_decoder')
-            self.y_recon = tf.nn.softmax(decoded_y, name='y_recon')    
-            self.pred_y = tf.argmax(self.y_recon, axis=1, name='pred_y')
-        
-    def _regression_network(self):
+    def _classifier_network(self,c_emb):
         n_labels = self.network_architecture['n_labels']
         dh = self.network_architecture['n_topics']
         regression_layers = self.network_architecture['regression_layers']     
+        n_covariates = self.network_architecture['n_covariates']  
         
-        if self.network_architecture['covars_in_downstream_task']:
-            regression_input = tf.concat([self.theta, self.c], axis=1)
+        if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
+            classifier_input = tf.concat([self.theta, c_emb], axis=1)
+        else:
+            classifier_input = self.theta
+        if classifier_layers == 0:
+            decoded_y = slim.layers.linear(classifier_input, n_labels, scope='y_decoder')
+        elif classifier_layers == 1:
+            cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
+            cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
+            decoded_y = slim.layers.linear(cls0_sp, n_labels, scope='y_decoder')
+        else:
+            cls0 = slim.layers.linear(classifier_input, dh, scope='cls0')
+            cls0_sp = tf.nn.softplus(cls0, name='cls0_softplus')
+            cls1 = slim.layers.linear(cls0_sp, dh, scope='cls1')
+            cls1_sp = tf.nn.softplus(cls1, name='cls1_softplus')
+            decoded_y = slim.layers.linear(cls1_sp, n_labels, scope='y_decoder')
+        self.y_recon = tf.nn.softmax(decoded_y, name='y_recon')    
+        self.pred_y = tf.argmax(self.y_recon, axis=1, name='pred_y')
+        
+    def _regression_network(self,c_emb):
+        n_labels = self.network_architecture['n_labels']
+        dh = self.network_architecture['n_topics']
+        regression_layers = self.network_architecture['regression_layers']     
+        n_covariates = self.network_architecture['n_covariates']     
+        covar_emb_dim = self.network_architecture['covar_emb_dim']
+        
+        if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
+            regression_input = tf.concat([self.theta, c_emb], axis=1)
         else:
             regression_input = self.theta
         if regression_layers == 0:
@@ -191,14 +198,21 @@ class Scholar(object):
         elif regression_layers == 1:
             reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
             reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
-            self.pred_y = slim.layers.linear(reg0_sp, n_labels, scope='pred_y')
+            if self.reg_intercept:
+                self.pred_y = tf.add(tf.matmul(reg0_sp,self.reg_weights), self.reg_bias)
+            else:
+                self.pred_y = tf.matmul(reg0_sp,self.reg_weights)
+            #self.pred_y = slim.layers.linear(reg0_sp, n_labels, scope='pred_y')
         else:
             reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
             reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
             reg1 = slim.layers.linear(reg0_sp, dh, scope='reg1')
             reg1_sp = tf.nn.softplus(reg1, name='reg1_softplus')
-            self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
-        return self.pred_y
+            if self.reg_intercept:
+                self.pred_y = tf.add(tf.matmul(reg0_sp,self.reg_weights), self.reg_bias)
+            else:
+                self.pred_y = tf.matmul(reg0_sp,self.reg_weights)
+            #self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
     
 
     def _create_network(self):
@@ -329,9 +343,9 @@ class Scholar(object):
 
         # predict labels using theta and (optionally) covariates
         if n_labels > 0 and self.task == "reg":
-            predy_reg = self._regression_network()
+            predy_reg = self._regression_network(c_emb)
         elif n_labels > 0 and self.task == "class":
-            predy_class, predy_recon = self._classifier_network()
+            predy_class, predy_recon = self._classifier_network(c_emb)
 
 
     def _initialize_weights(self):
