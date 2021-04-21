@@ -295,8 +295,10 @@ def main():
     # get regression weights
     if task =="reg":
         W, b = model.get_reg_weights()
-        fh.write_list_to_text([str(W)], os.path.join(output_dir, 'end_of_training_regression_weights.txt'))
-        fh.write_list_to_text([str(b)], os.path.join(output_dir, 'end_of_training_regression_bias.txt'))
+        #fh.write_list_to_text([str(W)], os.path.join(output_dir, 'end_of_training_regression_weights.txt'))
+        #fh.write_list_to_text([str(b)], os.path.join(output_dir, 'end_of_training_regression_bias.txt'))
+        pd.Series(data = W.squeeze(), name = "W").to_csv(os.path.join(output_dir, 'end_of_training_regression_weights.csv'))
+        pd.Series(data = b.squeeze(), name = "b").to_csv(os.path.join(output_dir, 'end_of_training_regression_bias.csv'))
         
     # print background
     bg = model.get_bg()
@@ -1098,9 +1100,12 @@ def test(model, network_architecture, X, Y, C, display_step= 200, min_weights_sq
             if output_dir is not None:
                 fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, subset + '_mse.txt'))
                 fh.write_list_to_text([str(pR)], os.path.join(output_dir, subset + '_pR2.txt'))
+                #pd.Series(data = task_loss, name = "mse").to_csv(os.path.join(output_dir, subset + '_mse.csv'))
+                #pd.Series(data= pR, name = "pR2").to_csv(os.path.join(output_dir, subset + '_pR2.csv'))
         # save the results to file
         if output_dir is not None:
             fh.write_list_to_text([str(eval_perplexity)], os.path.join(output_dir, subset + '_perplexity.txt'))
+            #pd.Series(data= eval_perplexity, name = "perplexity").to_csv(os.path.join(output_dir, subset + '_perplexity.csv'))
             # save actuals and predictions
             y_series = pd.DataFrame(Y)
             y_series.to_csv(os.path.join(output_dir, subset + '_y_actuals.csv'))
