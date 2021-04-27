@@ -726,8 +726,10 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_mse={:g}-epoch{}.ckpt'.format(best_loss, epoch))
                     # save regression coefficients
                     W, b = model.get_reg_weights()
-                    fh.write_list_to_text([str(W)], os.path.join(output_dir, 'best_val_regression_weights.txt'))
-                    fh.write_list_to_text([str(b)], os.path.join(output_dir, 'best_val_regression_bias.txt'))
+                    #fh.write_list_to_text([str(W)], os.path.join(output_dir, 'best_val_regression_weights.txt'))
+                    #fh.write_list_to_text([str(b)], os.path.join(output_dir, 'best_val_regression_bias.txt'))
+                    pd.Series(data = W.squeeze(), name = "W").to_csv(os.path.join(output_dir, 'best_val_regression_weights.csv'))
+                    pd.Series(data = b.squeeze(), name = "b").to_csv(os.path.join(output_dir, 'best_val_regression_bias.csv'))
                     if train_eval:
                         evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir)
                     if test_on_the_fly:
@@ -895,7 +897,8 @@ def save_weights(output_dir, beta, bg, feature_names, sparsity_threshold=1e-5):
         np.savez(os.path.join(output_dir, 'bg.npz'), bg=bg)
     fh.write_to_json(feature_names, os.path.join(output_dir, 'vocab.json'), sort_keys=False)
 
-    topics_file = os.path.join(output_dir, 'topics.txt')
+    topics_file = os.path.join(output_dir, 'topics_sparsity_weighted.txt')
+    topics_file_raw = os.path.join(output_dir, 'topics_unweighted.txt')
     lines = []
     for i in range(len(beta)):
         order = list(np.argsort(beta[i]))
@@ -903,8 +906,18 @@ def save_weights(output_dir, beta, bg, feature_names, sparsity_threshold=1e-5):
         pos_words = [feature_names[j] for j in order[:40] if beta[i][j] > sparsity_threshold]
         output = ' '.join(pos_words)
         lines.append(output)
+     
+    lines_raw = []
+    for i in range(len(beta)):
+        order = list(np.argsort(beta[i]))
+        order.reverse()
+        pos_words_raw = [feature_names[j] for j in order[:40]]
+        output_raw = ' '.join(pos_words_raw)
+        lines_raw.append(output_raw)
 
-    fh.write_list_to_text(lines, topics_file)
+    fh.write_list_to_text(lines, topics_file) 
+    fh.write_list_to_text(lines_raw, topics_file_raw)
+
 
 
 def print_label_embeddings(model, class_names):
