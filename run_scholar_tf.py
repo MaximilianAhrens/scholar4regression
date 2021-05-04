@@ -890,7 +890,7 @@ def evaluate_perplexity(model, X, Y, C, eta_bn_prop=1.0, n_samples=0):
 
 def save_weights(output_dir, beta, bg, feature_names, sparsity_threshold=1e-5):
     """
-    Save model weights to npz files (also the top words in each topic
+    Save model weights to npz files (also the top words in each topic)
     """
     np.savez(os.path.join(output_dir, 'beta.npz'), beta=beta)
     if bg is not None:
