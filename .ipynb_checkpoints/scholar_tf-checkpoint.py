@@ -232,11 +232,11 @@ class Scholar(object):
         
         # create placeholders for regression network
         with tf.variable_scope('regnet') as scope:
-            self.reg_weights = tf.Variable(np.random.normal(size=(dh+n_covariates,1)), name='reg_W',dtype=tf.float32)
+            self.reg_weights = tf.Variable(np.random.normal(size=(dh+n_covariates, n_labels)), name='reg_W',dtype=tf.float32)
             if self.reg_intercept:
-                self.reg_bias = tf.Variable(np.random.normal(), name='reg_b',dtype=tf.float32)  
+                self.reg_bias = tf.Variable(np.random.normal(size=(1,n_labels)), name='reg_b',dtype=tf.float32)  
             else:
-                self.reg_bias = tf.Variable(0, name='reg_b',dtype=tf.float32)  
+                self.reg_bias = tf.Variable(np.zeros(shape=(1,n_labels)), name='reg_b',dtype=tf.float32)  
         
 
         # create the first layer of the encoder

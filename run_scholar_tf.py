@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 import file_handling as fh
 from scholar_tf import Scholar
@@ -87,13 +88,13 @@ def main():
                       help='Number of layers in (generative) regression [0|1|2]: default=%default')
     parser.add_option('--task', dest='task', default="reg",
                       help='Select downstream task: either "class" or "reg".')
-    parser.add_option('--reg-intercept', action="store_false", dest='reg_intercept', default=True,
+    parser.add_option('--reg-intercept', action="store_true", dest='reg_intercept', default=False,
                       help='Whether final regression layer has a bias term.')
-    parser.add_option('--td-shuffle', action="store_false", dest='train_dev_shuffle', default=True,
+    parser.add_option('--no-td-shuffle', action="store_false", dest='train_dev_shuffle', default=True,
                       help='Whether to shuffle the training data for the train-dev split.')
     parser.add_option('--eval-on-fly', action="store_true", dest='test_on_the_fly', default=False,
                       help='Test immediately with best validation model.')
-    parser.add_option('--eval-train', action="store_true", dest='train_eval', default=False,
+    parser.add_option('--no-train-eval', action="store_false", dest='train_eval', default=True,
                       help='Additionally, evaluate performance on training set.')
     parser.add_option('--recent-saves', action="store_true", dest='recent_saves', default=False,
                       help='Save model every 10 epochs.')
@@ -148,8 +149,8 @@ def main():
     if isinstance(test_on_the_fly, bool) == False:
         raise ValueError("value for eval-on-fly not allowed.")
     if isinstance(train_dev_shuffle, bool) == False:
-        raise ValueError("value for train_dev_shuffle not allowed.")
-    if isinstance(train_dev_shuffle, bool) == False:
+        raise ValueError("value for td_shuffle not allowed.")
+    if isinstance(reg_intercept, bool) == False:
         raise ValueError("value for reg_intercept not allowed.")
     
     threads = int(options.threads)
@@ -162,6 +163,11 @@ def main():
     # load the training data
     train_X, vocab, train_labels, label_names, label_type, train_covariates, covariate_names, covariates_type, col_sel = load_data(input_dir, train_prefix, label_file_name, covar_file_names, vocab_size=vocab_size)
     n_train, dv = train_X.shape
+    
+    if train_X.shape[0] < batch_size:
+        print("Batch-size overwritten. Training sample size is {}. Original batch size was {}.".format(train_X.shape[0],batch_size))
+        batch_size = train_X.shape[0]
+        print("New batch size is:".format(batch_size))
 
     if train_labels is not None:
         _, n_labels = train_labels.shape
@@ -295,10 +301,8 @@ def main():
     # get regression weights
     if task =="reg":
         W, b = model.get_reg_weights()
-        #fh.write_list_to_text([str(W)], os.path.join(output_dir, 'end_of_training_regression_weights.txt'))
-        #fh.write_list_to_text([str(b)], os.path.join(output_dir, 'end_of_training_regression_bias.txt'))
-        pd.Series(data = W.squeeze(), name = "W").to_csv(os.path.join(output_dir, 'end_of_training_regression_weights.csv'))
-        pd.Series(data = b.squeeze(), name = "b").to_csv(os.path.join(output_dir, 'end_of_training_regression_bias.csv'))
+        pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'end_of_training_regression_weights.csv'))
+        pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'end_of_training_regression_bias.csv'))
         
     # print background
     bg = model.get_bg()
@@ -351,7 +355,7 @@ def main():
                                                                                                          X=test_X, Y=test_labels, C=test_covariates, 
                                                                                                          regularize=auto_regularize, bn_anneal=bn_anneal, 
                                                                                                          batch_size = batch_size, output_dir = output_dir, 
-                                                                                                         subset ="test_eval", task = task, test_set = True)
+                                                                                                         subset ="test_eval", task = task, save_results = True)
 
     # evaluate accuracy on covariates (if categorical)
     if n_covariates > 0 and covariates_type == 'categorical' and infer_covars:
@@ -625,19 +629,45 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
         l2_strengths = np.zeros([n_topics, dv])
         l2_strengths_c = np.zeros([model.beta_c_length, dv])
         l2_strengths_ci = np.zeros([model.beta_ci_length, dv])
+        
+    # for training set evaluation
+    if task == "reg":
+        task_name = "mse"
+        best_train_loss = np.inf
+    else:
+        task_name = "accuracy"
+        best_train_loss = 0.0
 
+    # for dev set evaluation
     if X_dev is not None:
         if task == "reg":
-            task_name = "mse"
             best_loss = np.inf
         else:
-            task_name = "accuracy"
             best_loss = 0.0
-        
+
+    if X_dev is not None:
+        if X_dev.shape[0] < batch_size:
+            dev_batch_size = X_dev.shape[0]
+        else:
+            dev_batch_size = batch_size
+        print("dev_batch_size:",dev_batch_size)
+            
+    if X_test is not None:        
+        if X_test.shape[0] < batch_size:
+            test_batch_size = X_test.shape[0]
+        else:
+            test_batch_size = batch_size
+        print("test_batch_size:",test_batch_size)
+
+
+    # epoch trackers
+    epoch_tracker_task_loss = []
+    epoch_tracker_dev_task_loss = []
+    epoch_tracker_test_task_loss = []
+    
     eta_bn_prop = init_eta_bn_prop  # interpolation between batch norm and no batch norm in final layer of recon
     kld_weight = 1.0  # could use this to anneal KLD, but not currently doing so
 
-    
     # Training cycle
     for epoch in range(training_epochs):
         avg_loss = 0.
@@ -663,11 +693,54 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
             # Compute average loss
             avg_loss += loss / n_train * batch_size
             avg_task_loss += task_loss_i / n_train * batch_size
+            # Save predictions
+            if i==0:
+                train_predictions = pred
+            else:
+                train_predictions = np.append(train_predictions,pred,axis=0)
             if np.isnan(avg_loss):
                 print(epoch, i, np.sum(batch_xs, 1).astype(np.int), batch_xs.shape)
                 print('Encountered NaN, stopping training. Please check the learning_rate settings and the momentum.')
                 # return vae,emb
                 sys.exit()
+        # log task loss for this epoch
+        epoch_tracker_task_loss.append(task_loss)
+                
+        # evaluate on training set if no dev set available (only use for small training samples where no dev set is available)
+        if X_dev is None and network_architecture['n_labels'] > 0 and train_eval==True:
+            if task == "class":
+                if  task_loss > best_train_loss: #accuracy
+                    best_train_loss = task_loss
+                    print("training | epoch: {} | new best training {}: {:.4}".format(epoch, task_name, best_train_loss))
+                    model.best_acc_saver.save(model.sess, model.checkpoint_dir + '/best-model-train_acc={:g}-epoch{}.ckpt'.format(best_train_loss, epoch))
+                    evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train_optimal")
+                else:
+                    print("training | epoch: {0} | last training {1} = {2}; best training {1} = {3} ".format(
+                        epoch, task_name, round(task_loss,4), round(best_train_loss,4)))
+            elif task == "reg":
+                if task_loss < best_train_loss: #mse
+                    best_train_loss = task_loss
+                    print("training | epoch: {} | new best training {}: {:.4}".format(epoch, task_name, best_train_loss))
+                    model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-train_mse={:g}-epoch{}.ckpt'.format(best_train_loss, epoch))
+                    # save regression coefficients
+                    W, b = model.get_reg_weights()
+                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'best_train_regression_weights.csv'))
+                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'best_train_regression_bias.csv'))
+                    evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train_optimal")
+                    if test_on_the_fly:
+                        test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_perplexity = test(model=model, 
+                                                                                                                    network_architecture=network_architecture,
+                                                                                                                    X=X_test, Y=Y_test, C=C_test,
+                                                                                                                    regularize=regularize, bn_anneal=0.0, 
+                                                                                                                    batch_size = test_batch_size, 
+                                                                                                                    output_dir = output_dir,
+                                                                                                                    subset ="test_eval", task = task, 
+                                                                                                                    save_results=True)
+                        epoch_tracker_task_task_loss.append(test_task_loss)
+                else:
+                    print("training | epoch: {0} | last training {1} = {2}; best training {1} = {3} ".format(
+                        epoch, task_name, round(task_loss,4), round(best_train_loss,4)))
+        
                  
         # update weight prior variances using current weight values
         if regularize:
@@ -694,31 +767,30 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
         if epoch % display_step == 0 and epoch > 0:
             if network_architecture['n_labels'] > 0:
                 print("training | epoch:", '%d' % epoch, "| loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; training {} (noisy) =".format(task_name), "{:.9f}".format(task_loss))
-                #print("training | y_act (first 3):\n", batch_ys[:3])
-                #print("training | y_pred (first 3):\n", pred[:3])
             else:
                 print("training | epoch:", '%d' % epoch, "loss=", "{:.9f}".format(avg_loss))
          
 
-        # early stopping for training based on dev set.  
+        # evaluate training based on dev set
         if X_dev is not None and network_architecture['n_labels'] > 0:
-            #print("Model evaluation - validation set")
-            #print("Predicting labels")
             dev_predictions, dev_task_loss, dev_avg_loss, dev_avg_task_loss, dev_perplexity = test(model = model, network_architecture = network_architecture, 
                                                                                                         X=X_dev, Y=Y_dev, C=C_dev, 
                                                                                                         regularize=regularize, bn_anneal=0.0, 
-                                                                                                        batch_size = batch_size, output_dir = output_dir, 
-                                                                                                        subset ="dev_eval", task = task, test_set = False)
+                                                                                                        batch_size = dev_batch_size, output_dir = output_dir, 
+                                                                                                        subset ="dev_eval", task = task, save_results = True)
+            epoch_tracker_dev_task_loss.append(dev_task_loss)
+            
             if task == "class":
                 if dev_task_loss > best_loss: #accuracy
                     best_loss = dev_task_loss
                     print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
                     model.best_acc_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_acc={:g}-epoch{}.ckpt'.format(best_loss, epoch))
                     if train_eval:
-                        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir)
+                        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train")
                 else:
                     print("validation | epoch: {0} | last validation {1} = {2}; best validation {1} = {3} ".format(
                         epoch, task_name, round(dev_task_loss,4), round(dev_task_loss,4)))
+                    
             elif task == "reg":
                 if dev_task_loss < best_loss: #mse
                     best_loss = dev_task_loss
@@ -726,19 +798,20 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_mse={:g}-epoch{}.ckpt'.format(best_loss, epoch))
                     # save regression coefficients
                     W, b = model.get_reg_weights()
-                    #fh.write_list_to_text([str(W)], os.path.join(output_dir, 'best_val_regression_weights.txt'))
-                    #fh.write_list_to_text([str(b)], os.path.join(output_dir, 'best_val_regression_bias.txt'))
-                    pd.Series(data = W.squeeze(), name = "W").to_csv(os.path.join(output_dir, 'best_val_regression_weights.csv'))
-                    pd.Series(data = b.squeeze(), name = "b").to_csv(os.path.join(output_dir, 'best_val_regression_bias.csv'))
+                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'best_val_regression_weights.csv'))
+                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'best_val_regression_bias.csv'))
                     if train_eval:
-                        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir)
+                        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train")
                     if test_on_the_fly:
                         test_predictions, test_task_loss, test_avg_loss, test_avg_task_loss, test_perplexity = test(model=model, 
-                                                                                                                         network_architecture=network_architecture,
-                                                                                                                         X=X_test, Y=Y_test, C=C_test,
-                                                                                                                         regularize=regularize, bn_anneal=0.0, 
-                                                                                                                         batch_size = batch_size, output_dir = output_dir,
-                                                                                                                         subset ="test_eval", task = task, test_set = True)
+                                                                                                                    network_architecture=network_architecture,
+                                                                                                                    X=X_test, Y=Y_test, C=C_test,
+                                                                                                                    regularize=regularize, bn_anneal=0.0, 
+                                                                                                                    batch_size = test_batch_size,
+                                                                                                                    output_dir = output_dir,
+                                                                                                                    subset ="test_eval", task = task,
+                                                                                                                    save_results=True)
+                        epoch_tracker_test_task_loss.append(test_task_loss)
                 else:
                     print("validation | epoch: {0} | last validation {1} = {2}; best validation {1} = {3} ".format(
                         epoch, task_name, round(dev_task_loss,4), round(best_loss,4)))
@@ -761,10 +834,27 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     eta_bn_prop = 0.0
                     
 
-    if X_dev is None and train_eval==True:
+    if X_dev is None and train_eval==False:
         # evaluate insample training on last epoch
-        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir)
-
+        evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train")
+    
+    # save task_loss trackers
+    train_loss_tracker = pd.Series(data = epoch_tracker_task_loss, name = "train_task_loss_per_epoch")
+    dev_loss_tracker = pd.Series(data = epoch_tracker_dev_task_loss, name = "dev_task_loss_per_epoch")
+    test_loss_tracker = pd.Series(data = epoch_tracker_test_task_loss, name = "test_task_loss_per_epoch")
+    
+    if output_dir is not None:
+        cols = ["red","green","blue"]
+        tracker_names = ["training loss","valuation loss","test loss"]
+        for idx, tracker in enumerate([train_loss_tracker, dev_loss_tracker, test_loss_tracker]):
+            plt.figure(figsize=(5,5))
+            plt.plot(tracker, color = cols[idx], alpha = 0.8)
+            plt.title(tracker_names[idx])
+            plt.xlabel("epoch")
+            plt.ylabel(task_name)
+            plt.savefig(os.path.join(output_dir, "plot_" +tracker_names[idx] + '_per_epoch.pdf'))
+            plt.close()
+            
     return model
 
 
@@ -999,21 +1089,36 @@ def predict_labels(model, X, C, Y=None, eta_bn_prop=0.0, task = None):
             return predictions, task_losses, losses
 
 
-def evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir):
+def evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred, subset):
     # Training set evaluation
     train_perplexity = evaluate_perplexity(model, X, Y, C, eta_bn_prop=eta_bn_prop)
     if output_dir is not None:
-        fh.write_list_to_text([str(train_perplexity)], os.path.join(output_dir, "train" + '_perplexity.txt'))
+        pd.Series(data= train_perplexity, name = "perplexity").to_csv(os.path.join(output_dir, subset + '_perplexity.csv'))
     if task == "reg":
         pR = 1-(task_loss/np.var(Y))
-        #print("{} | R^2 on labels = {:.4f}".format(subset, pR))
-        #print("{} | variance of y:".format(subset), np.var(Y))
         if output_dir is not None:
-            fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, "train" + '_mse.txt'))
-            fh.write_list_to_text([str(pR)], os.path.join(output_dir, "train" + '_pR2.txt'))
+            pd.Series(data= task_loss, name = "mse").to_csv(os.path.join(output_dir, subset + '_mse.csv'))
+            pd.Series(data= pR, name = "pR").to_csv(os.path.join(output_dir, subset + '_pR2.csv'))
+            print("{} | overall mse on labels:".format("train"), task_loss)
+            print("{} | overall R^2 om labels:".format("train"), pR)
+            y_series = pd.DataFrame(Y)
+            pred_series = pd.DataFrame(train_pred)
+            # save actuals and predictions
+            y_series.to_csv(os.path.join(output_dir, subset + '_y_actuals.csv'))
+            pred_series.to_csv(os.path.join(output_dir, subset + '_y_predictions.csv'))
+            # separate targets
+            if Y.shape[1] >1:
+                target_mses = np.sum((y_series - pred_series)**2) / float(y_series.shape[0])
+                target_pRs = 1-(target_mses/np.var(y_series))
+                print("{} | target-variance of y:".format("train"), np.var(y_series).values)
+                print("{} | target-mse on labels =".format("train"), target_mses.values)
+                print("{} | target-R^2 on labels = ".format("train"), target_pRs.values)
+                target_mses.to_csv(os.path.join(output_dir, subset + '_mses_per_target.csv'))
+                target_pRs.to_csv(os.path.join(output_dir, subset + '_pRs_per_target.csv'))  
 
 
-def test(model, network_architecture, X, Y, C, display_step= 200, min_weights_sq=1e-7, regularize=False, bn_anneal=True, init_eta_bn_prop=0.0, rng=None, batch_size = 200,output_dir=None, subset=None, task = None, verbose_updates = False, test_set = True):
+
+def test(model, network_architecture, X, Y, C, display_step= 200, min_weights_sq=1e-7, regularize=False, bn_anneal=True, init_eta_bn_prop=0.0, rng=None, batch_size = 200,output_dir=None, subset=None, task = None, verbose_updates = False, save_results = True):
     """
     Predict a label for each instance using the classifier (or regression) part of the network
     """
@@ -1099,28 +1204,37 @@ def test(model, network_architecture, X, Y, C, display_step= 200, min_weights_sq
 
     # Eval perplexity
     eval_perplexity = evaluate_perplexity(model, X, Y, C, eta_bn_prop=eta_bn_prop)
-    if test_set:
+    if save_results:
         print("{} | perplexity = {:.4f}".format(subset, eval_perplexity))
         print("{} | {}:".format(subset, task_name),task_loss)
         print("{} | avg. loss:".format(subset),avg_loss)
         # Predictions
-        pred_series = pd.Series(predictions.squeeze())
+        pred_series = pd.DataFrame(predictions)
+        #actuals
+        y_series = pd.DataFrame(Y)
         # only for mse 
         if task == "reg":
+            # overall
             pR = 1-(task_loss/np.var(Y))
             print("{} | R^2 on labels = {:.4f}".format(subset, pR))
             print("{} | variance of y:".format(subset), np.var(Y))
+            # separate targets
+            if pred_series.shape[1] >1:
+                target_mses = np.sum((y_series - pred_series)**2) / float(y_series.shape[0])
+                target_pRs = 1-(target_mses/np.var(y_series))
+                print("{} | target-variance of y:".format(subset), np.var(y_series).values)
+                print("{} | target-mse on labels =".format(subset), target_mses.values)
+                print("{} | target-R^2 on labels = ".format(subset), target_pRs.values)
             if output_dir is not None:
-                fh.write_list_to_text([str(task_loss)], os.path.join(output_dir, subset + '_mse.txt'))
-                fh.write_list_to_text([str(pR)], os.path.join(output_dir, subset + '_pR2.txt'))
-                #pd.Series(data = task_loss, name = "mse").to_csv(os.path.join(output_dir, subset + '_mse.csv'))
-                #pd.Series(data= pR, name = "pR2").to_csv(os.path.join(output_dir, subset + '_pR2.csv'))
+                pd.Series(data = task_loss, name = "mse").to_csv(os.path.join(output_dir, subset + '_mse.csv'))
+                pd.Series(data= pR, name = "pR2").to_csv(os.path.join(output_dir, subset + '_pR2.csv'))  
+                if pred_series.shape[1] >1:
+                    target_mses.to_csv(os.path.join(output_dir, subset + '_mses_per_target.csv'))
+                    target_pRs.to_csv(os.path.join(output_dir, subset + '_pRs_per_target.csv'))  
         # save the results to file
         if output_dir is not None:
-            fh.write_list_to_text([str(eval_perplexity)], os.path.join(output_dir, subset + '_perplexity.txt'))
-            #pd.Series(data= eval_perplexity, name = "perplexity").to_csv(os.path.join(output_dir, subset + '_perplexity.csv'))
+            pd.Series(data= eval_perplexity, name = "perplexity").to_csv(os.path.join(output_dir, subset + '_perplexity.csv'))
             # save actuals and predictions
-            y_series = pd.DataFrame(Y)
             y_series.to_csv(os.path.join(output_dir, subset + '_y_actuals.csv'))
             pred_series.to_csv(os.path.join(output_dir, subset + '_y_predictions.csv'))
             
