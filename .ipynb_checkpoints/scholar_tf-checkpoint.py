@@ -476,8 +476,8 @@ class Scholar(object):
             pred = -1
         return loss, task_loss, pred
 
-    
-    def eval_test(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=0.0, kld_weight=1.0, keep_prob=1.0,is_training=False):
+
+    def predict(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=0.0, kld_weight=1.0, keep_prob=1.0,is_training=False):
         """
         Evaluate the model:
         Predict document representations (theta) and labels (Y) given input (X) and covariates (C)
