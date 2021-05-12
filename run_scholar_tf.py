@@ -255,7 +255,6 @@ def main():
         test_covariates = None
         
     # setup for dev and test batch-sizes                
-
     if test_batch_size is not None:
         test_batch_size = int(test_batch_size)    
     
@@ -300,6 +299,9 @@ def main():
         print(key + ':', val)
     print("train-val-set shuffle:", train_dev_shuffle)
     print("regularize:", auto_regularize)
+    print("shape training corpus:", train_X.shape)
+    print("shape dev corpus:", dev_X.shape)
+    print("shape test corpus:", test_X.shape)
     print("dev_batch_size:",dev_batch_size)
     print("test_batch_size:",test_batch_size)
 
@@ -811,7 +813,7 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                                                                                                                     output_dir = output_dir,
                                                                                                                     subset ="test_best_dev", task = task, 
                                                                                                                     save_results=True)
-                        epoch_tracker_task_task_loss.append(test_task_loss)
+                        epoch_tracker_test_task_loss.append(test_task_loss)
                 else:
                     print("training | epoch: {0} | last training {1} = {2}; best training {1} = {3} ".format(
                         epoch, task_name, round(task_loss,4), round(best_train_loss,4)))
