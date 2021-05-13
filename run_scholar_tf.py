@@ -582,6 +582,7 @@ def create_minibatch(X, Y, C, batch_size=200, rng=None):
         else:
             yield X[ixs, :].astype('float32'), None, None
 
+            
 
 def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_downstream_task=True, regression_layers = 0, task = "reg", reg_intercept=True, test_on_the_fly = False, train_eval = False, recent_saves = False, eval_last_epoch = False):
     """
@@ -789,8 +790,8 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-train_mse={:g}-epoch{}.ckpt'.format(best_train_loss, epoch))
                     # save regression coefficients
                     W, b = model.get_reg_weights()
-                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'best_train_regression_weights.csv'))
-                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'best_train_regression_bias.csv'))
+                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_train.csv'))
+                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_train.csv'))
                     _, _, _, _, _, _ = evaluate(model=model, 
                                             network_architecture=network_architecture,
                                             X=X, Y=Y, C=C,
@@ -1112,7 +1113,10 @@ def save_weights(output_dir, beta, bg, feature_names, sparsity_threshold=1e-5, s
         order = list(np.argsort(beta[i]))
         order.reverse()
         pos_words = [feature_names[j] for j in order[:40] if beta[i][j] > sparsity_threshold]
-        output = ' '.join(pos_words)
+        try:
+            output = ' '.join(pos_words)
+        except TypeError:
+            output = ' '.join(str(pos_words))
         lines.append(output)
      
     lines_raw = []
@@ -1120,7 +1124,10 @@ def save_weights(output_dir, beta, bg, feature_names, sparsity_threshold=1e-5, s
         order = list(np.argsort(beta[i]))
         order.reverse()
         pos_words_raw = [feature_names[j] for j in order[:40]]
-        output_raw = ' '.join(pos_words_raw)
+        try:
+            output_raw = ' '.join(pos_words_raw)
+        except TypeError:
+            output_raw = ' '.join(str(pos_words_raw))    
         lines_raw.append(output_raw)
 
     fh.write_list_to_text(lines, topics_file) 
@@ -1250,7 +1257,7 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
     
     # input a vector of all zeros in place of the labels that the model has been trained on
     Y_zeros = np.zeros((n_items, network_architecture['n_labels'])).astype('float32')
-
+    
     # create np arrays to store regularization strengths, which we'll update outside of the tensorflow model
     if regularize:
         l2_strengths = 0.5 * np.ones([n_topics, dv]) / float(n_train)
@@ -1262,9 +1269,6 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
         l2_strengths_ci = np.zeros([model.beta_ci_length, dv])
 
     total_batch = int(n_items / batch_size)
-    #print("nr of eval batches", total_batch)
-    #print("eval batch size", batch_size)
-    
     display_step = int(total_batch*0.2)
 
     eta_bn_prop = init_eta_bn_prop  # interpolation between batch norm and no batch norm in final layer of recon
@@ -1282,8 +1286,14 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
     for i in range(total_batch):
         # get a minibatch
         ixs = range(batch_size*i,batch_size*(i+1))
-        obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), C[ixs, :].astype('float32')
-        #print("val input shapes",obs_xs.shape, obs_ys.shape,obs_cs.shape)
+        if Y_zeros is not None and C is not None:
+            obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), C[ixs, :].astype('float32')
+        elif Y_zeros is not None:
+            obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), None
+        elif C is not None:
+            obs_xs, obs_ys, obs_y_zeros, obs_cs =  X[ixs, :].astype('float32'), None, None, C[ixs, :].astype('float32')
+        else:
+            obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), None, None, None
         # do one update, passing in the data, regularization strengths, and bn
         loss, task_loss_i, pred, theta = model.predict(X=obs_xs, Y=obs_y_zeros, C=obs_cs, l2_strengths=l2_strengths, 
                                          l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci,
@@ -1366,6 +1376,8 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
     
     return predictions, task_loss, avg_loss, avg_task_loss, eval_perplexity_all, eval_perplexity_text 
     
+
+
     
     
 if __name__ == '__main__':

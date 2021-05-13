@@ -153,14 +153,14 @@ class Scholar(object):
         if init_embeddings is not None:
             self.sess.run(self.network_weights['embeddings'].assign(init_embeddings))
           
-    def _classifier_network(self,c_emb):
+    def _classifier_network(self):
         n_labels = self.network_architecture['n_labels']
         dh = self.network_architecture['n_topics']
         regression_layers = self.network_architecture['regression_layers']     
         n_covariates = self.network_architecture['n_covariates']  
         
         if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
-            classifier_input = tf.concat([self.theta, c_emb], axis=1)
+            classifier_input = tf.concat([self.theta, self.c_emb], axis=1)
         else:
             classifier_input = self.theta
         if classifier_layers == 0:
@@ -178,7 +178,7 @@ class Scholar(object):
         self.y_recon = tf.nn.softmax(decoded_y, name='y_recon')    
         self.pred_y = tf.argmax(self.y_recon, axis=1, name='pred_y')
         
-    def _regression_network(self,c_emb):
+    def _regression_network(self):
         n_labels = self.network_architecture['n_labels']
         dh = self.network_architecture['n_topics']
         regression_layers = self.network_architecture['regression_layers']     
@@ -186,7 +186,7 @@ class Scholar(object):
         covar_emb_dim = self.network_architecture['covar_emb_dim']
         
         if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
-            regression_input = tf.concat([self.theta, c_emb], axis=1)
+            regression_input = tf.concat([self.theta, self.c_emb], axis=1)
         else:
             regression_input = self.theta
         if regression_layers == 0:
@@ -261,18 +261,18 @@ class Scholar(object):
         # do the same for covariates
         if n_covariates > 0:
             if covar_emb_dim > 0:
-                c_emb = tf.matmul(self.c, self.network_weights['covariate_embeddings'])
-                en0_c = c_emb
+                self.c_emb = tf.matmul(self.c, self.network_weights['covariate_embeddings'])
+                en0_c = self.c_emb
                 emb_size += covar_emb_dim
                 encoder_parts.append(en0_c)
             elif covar_emb_dim < 0:
                 # if covar_emb_dim < 0 (default), just feed in covariate vectors as is
-                c_emb = self.c
+                self.c_emb = self.c
                 emb_size += n_covariates
-                encoder_parts.append(c_emb)
+                encoder_parts.append(self.c_emb)
             else:
                 # if covar_emb_dim == 0, do not give the covariate vectors to the encoder
-                c_emb = self.c
+                self.c_emb = self.c
 
         # combine everything to produce the output of layer 0
         if len(encoder_parts) > 1:
@@ -327,10 +327,10 @@ class Scholar(object):
 
         # add deviations for covariates (and interactions)
         if n_covariates > 0:
-            eta = tf.add(eta, tf.matmul(c_emb, self.network_weights['beta_c']))
+            eta = tf.add(eta, tf.matmul(self.c_emb, self.network_weights['beta_c']))
             if use_covar_interactions:
                 gen_output_rsh = tf.reshape(self.theta, [self.batch_size, dh, 1])
-                c_emb_rsh = array_ops.reshape(c_emb, [self.batch_size, 1, self.beta_c_length])
+                c_emb_rsh = array_ops.reshape(self.c_emb, [self.batch_size, 1, self.beta_c_length])
                 covar_interactions = tf.reshape(gen_output_rsh * c_emb_rsh, [self.batch_size, self.beta_ci_length])
                 eta = tf.add(eta, tf.matmul(covar_interactions, self.network_weights['beta_ci']))
 
@@ -343,9 +343,9 @@ class Scholar(object):
 
         # predict labels using theta and (optionally) covariates
         if n_labels > 0 and self.task == "reg":
-            predy_reg = self._regression_network(c_emb)
+            predy_reg = self._regression_network()
         elif n_labels > 0 and self.task == "class":
-            predy_class, predy_recon = self._classifier_network(c_emb)
+            predy_class, predy_recon = self._classifier_network()
 
 
     def _initialize_weights(self):
