@@ -484,22 +484,14 @@ class Scholar(object):
         """
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
-        if Y is not None:
-            loss, task_loss, pred, theta = self.sess.run((self.loss, self.task_loss, self.pred_y, self.theta), 
-                                                         feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths,
-                                                                    self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci,
-                                                                    self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input, 
-                                                                    self.is_training: is_training, self.batch_size: batch_size, self.var_scale: 0.0})
-        else:
-            loss = self.sess.run((self.loss), 
-                                 feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: keep_prob, self.l2_strengths: l2_strengths, 
-                                            self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, 
-                                            self.kld_weight: kld_weight, self.theta_input: theta_input, self.is_training: is_training, 
-                                            self.batch_size: batch_size, self.var_scale: 0.0})
-            task_loss = 0
-            pred = -1
+        loss, task_loss, pred, theta = self.sess.run((self.loss, self.task_loss, self.pred_y, self.theta), 
+                                                     feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths,
+                                                                self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci,
+                                                                self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input, 
+                                                                self.is_training: False, self.batch_size: batch_size, self.var_scale: 0.0})
         return loss, task_loss, pred, theta
 
+    
                                                                                                                 
     def predict_from_topics(self, theta, C=None):
         """
@@ -656,6 +648,7 @@ class Scholar(object):
         # options for saving the model
         self.best_acc_saver = tf.train.Saver(max_to_keep=1)
         self.best_mse_saver = tf.train.Saver(max_to_keep=1)
+        self.best_plxy_saver = tf.train.Saver(max_to_keep=1)
         self.recent_saver = tf.train.Saver(max_to_keep=1)
         self.checkpoint_dir = os.path.abspath(os.path.join(self.output_dir, "checkpoints"))
         if not os.path.exists(self.checkpoint_dir):

@@ -125,6 +125,7 @@ def main():
     encoder_shortcuts = options.encoder_shortcuts
     label_file_name = options.label_name
     covar_file_names = options.covar_names
+    unsup_covar_file_names = options.covar_names
     use_covar_interactions = options.covar_interactions
     infer_covars = options.infer_covars
     label_emb_dim = int(options.label_emb_dim)
@@ -248,6 +249,8 @@ def main():
                 test_covariates = test_covariates[:, covariate_selector]
             _, n_covariates_test = test_covariates.shape
             assert n_covariates_test == n_covariates
+        
+        
     else:
         test_X = None
         n_test = 0
@@ -300,10 +303,17 @@ def main():
     print("train-val-set shuffle:", train_dev_shuffle)
     print("regularize:", auto_regularize)
     print("shape training corpus:", train_X.shape)
-    print("shape dev corpus:", dev_X.shape)
-    print("shape test corpus:", test_X.shape)
-    print("dev_batch_size:",dev_batch_size)
-    print("test_batch_size:",test_batch_size)
+    if dev_X is not None:
+        print("shape dev corpus:", dev_X.shape)
+        print("dev_batch_size:",dev_batch_size)
+    else:
+        print("shape dev corpus:", "no dev set")
+    if test_X is not None:
+        print("shape test corpus:", test_X.shape)
+        print("test_batch_size:",test_batch_size)
+    else:
+        print("shape test corpus:", "no test set")
+
 
     # load pretrained word vectors
     if word2vec_file is not None:
@@ -347,7 +357,6 @@ def main():
     # save vocab
     fh.write_to_json(vocab, os.path.join(output_dir, 'vocab.json'), sort_keys=False)
     
-            
     # evaluate accuracy/mse on labels
     if test_labels is not None and eval_last_epoch == True:
         print("\n###\nModel evaluation - test set\n###\n")
@@ -713,11 +722,15 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
             best_loss = np.inf
         else:
             best_loss = 0.0
+        best_plxy = np.inf
 
     # epoch trackers
     epoch_tracker_task_loss = []
     epoch_tracker_dev_task_loss = []
     epoch_tracker_test_task_loss = []
+    epoch_tracker_plxy = []
+    epoch_tracker_dev_plxy = []
+    epoch_tracker_test_plxy = []
     
     eta_bn_prop = init_eta_bn_prop  # interpolation between batch norm and no batch norm in final layer of recon
     kld_weight = 1.0  # could use this to anneal KLD, but not currently doing so
@@ -748,10 +761,11 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
             avg_loss += loss / n_train * batch_size
             avg_task_loss += task_loss_i / n_train * batch_size
             # Save predictions
-            if i==0:
-                train_predictions = pred
-            else:
-                train_predictions = np.append(train_predictions,pred,axis=0)
+            if Y is not None:
+                if i==0:
+                    train_predictions = pred
+                else:
+                    train_predictions = np.append(train_predictions,pred,axis=0)
             if np.isnan(avg_loss):
                 print(epoch, i, np.sum(batch_xs, 1).astype(np.int), batch_xs.shape)
                 print('Encountered NaN, stopping training. Please check the learning_rate settings and the momentum.')
@@ -767,7 +781,7 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     best_train_loss = task_loss
                     print("training | epoch: {} | new best training {}: {:.4}".format(epoch, task_name, best_train_loss))
                     model.best_acc_saver.save(model.sess, model.checkpoint_dir + '/best-model-train_acc={:g}-epoch{}.ckpt'.format(best_train_loss, epoch))
-                    _, _, _, _, _, _ = evaluate(model=model, 
+                    _, _, _, _, _, train_plxy_text = evaluate(model=model, 
                                             network_architecture=network_architecture,
                                             X=X, Y=Y, C=C,
                                             regularize=regularize, bn_anneal=0.0, 
@@ -775,11 +789,11 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                                             output_dir = output_dir,
                                             subset ="best_train", task = task, 
                                             save_results=True)
-                    #evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "best_train")
                     # save latent variables
                     save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
                                      use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
                                      subset = "best_train", verbose = False)
+                    epoch_tracker_plxy.append(train_plxy_text)
                 else:
                     print("training | epoch: {0} | last training {1} = {2}; best training {1} = {3} ".format(
                         epoch, task_name, round(task_loss,4), round(best_train_loss,4)))
@@ -792,7 +806,7 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     W, b = model.get_reg_weights()
                     pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_train.csv'))
                     pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_train.csv'))
-                    _, _, _, _, _, _ = evaluate(model=model, 
+                    _, _, _, _, _, train_plxy_text = evaluate(model=model, 
                                             network_architecture=network_architecture,
                                             X=X, Y=Y, C=C,
                                             regularize=regularize, bn_anneal=0.0, 
@@ -800,13 +814,13 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                                             output_dir = output_dir,
                                             subset ="best_train", task = task, 
                                             save_results=True)
-                    #evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "best_train")
                     # save latent variables
                     save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
                                      use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
                                      subset = "best_train", verbose = False)
+                    epoch_tracker_plxy.append(train_plxy_text)
                     if test_on_the_fly:
-                        _, test_task_loss, _, _, _,_  = evaluate(model=model, 
+                        _, test_task_loss, _, _, _,test_plxy_text  = evaluate(model=model, 
                                                                             network_architecture=network_architecture,
                                                                             X=X_test, Y=Y_test, C=C_test,
                                                                             regularize=regularize, bn_anneal=0.0, 
@@ -815,11 +829,131 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                                                                             subset ="test_best_dev", task = task, 
                                                                             save_results=True)
                         epoch_tracker_test_task_loss.append(test_task_loss)
+                        epoch_tracker_test_plxy.append(test_plxy_text)
                 else:
                     print("training | epoch: {0} | last training {1} = {2}; best training {1} = {3} ".format(
                         epoch, task_name, round(task_loss,4), round(best_train_loss,4)))
         
-                 
+         
+
+        # evaluate on dev set
+        if X_dev is not None and network_architecture['n_labels'] > 0:
+            dev_predictions, dev_task_loss, _, _, _, dev_plxy_text = evaluate(model = model, network_architecture = network_architecture, 
+                                                                                                        X=X_dev, Y=Y_dev, C=C_dev, 
+                                                                                                        regularize=regularize, bn_anneal=0.0, 
+                                                                                                        batch_size = dev_batch_size, output_dir = output_dir, 
+                                                                                                        subset ="dev_eval", task = task, save_results = False)
+            epoch_tracker_dev_task_loss.append(dev_task_loss)
+            epoch_tracker_dev_plxy.append(dev_plxy_text)
+            if task == "class":
+                if dev_task_loss > best_loss: #accuracy
+                    best_loss = dev_task_loss
+                    print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
+                    model.best_acc_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_acc={:g}-epoch{}.ckpt'.format(best_loss, epoch))
+                    # save latent variables
+                    save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
+                                     use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
+                                     subset = "best_dev", verbose = False)
+                    if train_eval:
+                        _, _, _, _, _, train_plxy_text = evaluate(model=model, 
+                                                network_architecture=network_architecture,
+                                                X=X, Y=Y, C=C,
+                                                regularize=regularize, bn_anneal=0.0, 
+                                                batch_size = X.shape[0], 
+                                                output_dir = output_dir,
+                                                subset ="train_best_dev", task = task, 
+                                                save_results=True)
+
+                        epoch_tracker_plxy.append(train_plxy_text)
+                else:
+                    print("validation | epoch: {0} | last validation {1} = {2}; best validation {1} = {3} ".format(
+                        epoch, task_name, round(dev_task_loss,4), round(dev_task_loss,4)))
+                    
+            elif task == "reg":
+                if dev_task_loss < best_loss: #mse
+                    best_loss = dev_task_loss
+                    print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
+                    model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_mse={:g}-epoch{}.ckpt'.format(best_loss, epoch))
+                    # save regression coefficients
+                    W, b = model.get_reg_weights()
+                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_dev.csv'))
+                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_dev.csv'))
+                    # save latent variables
+                    save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
+                                     use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
+                                     subset = "best_dev", verbose = False)
+                    if train_eval:
+                        _, _, _, _, _, train_plxy_text = evaluate(model=model, 
+                                                    network_architecture=network_architecture,
+                                                    X=X, Y=Y, C=C,
+                                                    regularize=regularize, bn_anneal=0.0, 
+                                                    batch_size = X.shape[0], 
+                                                    output_dir = output_dir,
+                                                    subset ="train_best_dev", task = task, 
+                                                    save_results=True)
+                        epoch_tracker_plxy.append(train_plxy_text)
+                    if test_on_the_fly:
+                        _, test_task_loss, _, _, _, test_plxy_text = evaluate(model=model, 
+                                                                network_architecture=network_architecture,
+                                                                X=X_test, Y=Y_test, C=C_test,
+                                                                regularize=regularize, bn_anneal=0.0, 
+                                                                batch_size = test_batch_size,
+                                                                output_dir = output_dir,
+                                                                subset ="test_best_dev", task = task,
+                                                                save_results=True)
+                        epoch_tracker_test_task_loss.append(test_task_loss)
+                        epoch_tracker_test_plxy.append(test_plxy_text)
+                else:
+                    print("validation | epoch: {0} | last validation {1} = {2}; best validation {1} = {3} ".format(
+                        epoch, task_name, round(dev_task_loss,4), round(best_loss,4)))
+
+            print("validation | epoch: {} | dev perplexity = {:.4f}".format(epoch, dev_plxy_text))
+            if verbose_updates:
+                print("validation | y_act (first 3):\n", Y_dev[:3])
+                print("validation | y_pred (first 3):\n", dev_predictions[:3])
+
+        # if unsupervised, use model that performs best in dev set based on perplexity
+        if X_dev is not None and network_architecture['n_labels'] == 0:
+            _, _, dev_avg_loss, _, _, dev_plxy_text = evaluate(model = model, network_architecture = network_architecture, 
+                                                                                            X=X_dev, Y=Y_dev, C=C_dev, 
+                                                                                            regularize=regularize, bn_anneal=0.0, 
+                                                                                            batch_size = dev_batch_size, output_dir = output_dir, 
+                                                                                            subset ="dev_eval", task = task, save_results = False)
+            epoch_tracker_dev_plxy.append(dev_plxy_text)
+            if dev_plxy_text < best_plxy: #perplexity on text only
+                best_plxy = dev_plxy_text
+                print("validation | epoch: {} | new best validation perplexity: {:.4}".format(epoch, best_plxy))
+                model.best_plxy_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_mse={:g}-epoch{}.ckpt'.format(best_plxy, epoch))
+                if X_test is not None:
+                        # estimate thetas
+                                # save document representations
+                                #theta = model.compute_theta(X_test, Y_test, Y_test)
+                                #np.savez(os.path.join(output_dir, 'theta.train_last_epoch.npz'), theta=theta)
+                        _, _, _, _, _, test_plxy_text = evaluate(model = model, network_architecture = network_architecture, 
+                                                                                            X=X_test, Y=None, C= C_test, 
+                                                                                            regularize=regularize, bn_anneal=0.0, 
+                                                                                            batch_size = test_batch_size, output_dir = output_dir, 
+                                                                                            subset ="test_best_dev", task = task, save_results = True)
+                        epoch_tracker_test_plxy.append(test_plxy_text)
+                # save latent variables
+                save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
+                                 use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
+                                 subset = "best_dev", verbose = False)
+                # save training evaluation
+                _, _, _, _, _, train_plxy_text = evaluate(model=model, 
+                                            network_architecture=network_architecture,
+                                            X=X, Y=Y, C=C,
+                                            regularize=regularize, bn_anneal=0.0, 
+                                            batch_size = X.shape[0], 
+                                            output_dir = output_dir,
+                                            subset ="train_best_dev", task = task, 
+                                            save_results=True)
+                epoch_tracker_plxy.append(train_plxy_text)
+            else:
+                print("validation | epoch: {0} | last validation {1} = {2}; last validation {3} = {4}; best validation {3} = {5} ".format(
+                    epoch, "avg. loss", round(dev_avg_loss,4),"perplexity", round(dev_plxy_text,4), round(best_plxy,4)))
+
+            
         # update weight prior variances using current weight values
         if regularize:
             weights = model.get_weights()
@@ -840,6 +974,13 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     # avoid infinite regularization
                     weights_sq[weights_sq < min_weights_sq] = min_weights_sq
                     l2_strengths_ci = 0.5 / weights_sq / float(n_train)
+                    
+        # anneal eta_bn_prop from 1 to 0 over the course of training
+        if bn_anneal:
+            if eta_bn_prop > 0:
+                eta_bn_prop -= 1.0 / float(training_epochs*0.75)
+                if eta_bn_prop < 0:
+                    eta_bn_prop = 0.0
 
         # Display logs per epoch step
         if epoch % display_step == 0 and epoch > 0:
@@ -847,96 +988,14 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                 print("training | epoch:", '%d' % epoch, "| loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; training {} (noisy) =".format(task_name), "{:.9f}".format(task_loss))
             else:
                 print("training | epoch:", '%d' % epoch, "loss=", "{:.9f}".format(avg_loss))
-         
-
-        # evaluate training based on dev set
-        if X_dev is not None and network_architecture['n_labels'] > 0:
-            dev_predictions, dev_task_loss, _, _, _, dev_perplexity_text = evaluate(model = model, network_architecture = network_architecture, 
-                                                                                                        X=X_dev, Y=Y_dev, C=C_dev, 
-                                                                                                        regularize=regularize, bn_anneal=0.0, 
-                                                                                                        batch_size = dev_batch_size, output_dir = output_dir, 
-                                                                                                        subset ="dev_eval", task = task, save_results = False)
-            epoch_tracker_dev_task_loss.append(dev_task_loss)
-            
-            if task == "class":
-                if dev_task_loss > best_loss: #accuracy
-                    best_loss = dev_task_loss
-                    print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
-                    model.best_acc_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_acc={:g}-epoch{}.ckpt'.format(best_loss, epoch))
-                    if train_eval:
-                        _, _, _, _, _, _ = evaluate(model=model, 
-                                                network_architecture=network_architecture,
-                                                X=X, Y=Y, C=C,
-                                                regularize=regularize, bn_anneal=0.0, 
-                                                batch_size = X.shape[0], 
-                                                output_dir = output_dir,
-                                                subset ="train_best_dev", task = task, 
-                                                save_results=True)
-                        #evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train_best_dev")
-                    # save latent variables
-                    save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
-                                     use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
-                                     subset = "best_dev", verbose = False)
-                else:
-                    print("validation | epoch: {0} | last validation {1} = {2}; best validation {1} = {3} ".format(
-                        epoch, task_name, round(dev_task_loss,4), round(dev_task_loss,4)))
-                    
-            elif task == "reg":
-                if dev_task_loss < best_loss: #mse
-                    best_loss = dev_task_loss
-                    print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
-                    model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_mse={:g}-epoch{}.ckpt'.format(best_loss, epoch))
-                    # save regression coefficients
-                    W, b = model.get_reg_weights()
-                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_dev.csv'))
-                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_dev.csv'))
-                    # save latent variables
-                    save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
-                                     use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
-                                     subset = "best_dev", verbose = False)
-                    if train_eval:
-                        _, _, _, _, _, _ = evaluate(model=model, 
-                                                    network_architecture=network_architecture,
-                                                    X=X, Y=Y, C=C,
-                                                    regularize=regularize, bn_anneal=0.0, 
-                                                    batch_size = X.shape[0], 
-                                                    output_dir = output_dir,
-                                                    subset ="train_best_dev", task = task, 
-                                                    save_results=True)
-                        #evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train_best_dev")
-                    if test_on_the_fly:
-                        _, test_task_loss, _, _, _, _ = evaluate(model=model, 
-                                                                network_architecture=network_architecture,
-                                                                X=X_test, Y=Y_test, C=C_test,
-                                                                regularize=regularize, bn_anneal=0.0, 
-                                                                batch_size = test_batch_size,
-                                                                output_dir = output_dir,
-                                                                subset ="test_best_dev", task = task,
-                                                                save_results=True)
-                        epoch_tracker_test_task_loss.append(test_task_loss)
-                else:
-                    print("validation | epoch: {0} | last validation {1} = {2}; best validation {1} = {3} ".format(
-                        epoch, task_name, round(dev_task_loss,4), round(best_loss,4)))
-
-            print("validation | epoch: {} | dev perplexity = {:.4f}".format(epoch, dev_perplexity_text))
-            if verbose_updates:
-                print("validation | y_act (first 3):\n", Y_dev[:3])
-                print("validation | y_pred (first 3):\n", dev_predictions[:3])
-
-            
+        
+        # save current model
         if epoch % 10==0 and recent_saves==True:
             model.recent_saver.save(model.sess, model.checkpoint_dir + '/recent-model-val_{}={:g}-epoch{}.ckpt'.format(task_name, dev_task_loss, epoch))
 
-
-        # anneal eta_bn_prop from 1 to 0 over the course of training
-        if bn_anneal:
-            if eta_bn_prop > 0:
-                eta_bn_prop -= 1.0 / float(training_epochs*0.75)
-                if eta_bn_prop < 0:
-                    eta_bn_prop = 0.0
-                    
-
-    if network_architecture['n_labels'] < 1 or network_architecture['eval_last_epoch']==True :
+           
+    # option to evaluate training set after last training epoch
+    if network_architecture['n_labels'] < 1 or network_architecture['eval_last_epoch']==True:
         # evaluate insample training on last epoch
         _, _, _, _, _, _ = evaluate(model=model, 
                                 network_architecture=network_architecture,
@@ -946,26 +1005,32 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                                 output_dir = output_dir,
                                 subset ="train_last_epoch", task = task, 
                                 save_results=True)
-        #evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, train_pred = train_predictions, subset = "train_last_epoch")
         # save latent variables
         save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
                          use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
                          subset = "train_last_epoch", verbose = False)
     
     # save task_loss trackers
-    train_loss_tracker = pd.Series(data = epoch_tracker_task_loss, name = "train_task_loss_per_epoch")
-    dev_loss_tracker = pd.Series(data = epoch_tracker_dev_task_loss, name = "dev_task_loss_per_epoch")
-    test_loss_tracker = pd.Series(data = epoch_tracker_test_task_loss, name = "test_task_loss_per_epoch")
+    train_loss_tracker = pd.Series(data = epoch_tracker_task_loss, name = "train_{}_per_epoch".format(task_name))
+    dev_loss_tracker = pd.Series(data = epoch_tracker_dev_task_loss, name = "dev_{}_per_epoch".format(task_name))
+    test_loss_tracker = pd.Series(data = epoch_tracker_test_task_loss, name = "test_{}_per_epoch".format(task_name))
+    train_plxy_tracker = pd.Series(data = epoch_tracker_plxy, name = "train_plxy_per_epoch")
+    dev_plxy_tracker = pd.Series(data = epoch_tracker_dev_plxy, name = "dev_plxy_per_epoch")
+    test_plxy_tracker = pd.Series(data = epoch_tracker_test_plxy, name = "test_plxy_per_epoch")
     
     if output_dir is not None:
-        cols = ["red","green","blue"]
-        tracker_names = ["training_loss","validation_loss","test_loss"]
-        for idx, tracker in enumerate([train_loss_tracker, dev_loss_tracker, test_loss_tracker]):
+        cols = ["red","green","blue","red","green","blue"]
+        tracker_names = ["training_loss","validation_loss","test_loss","training_plxy","validation_plxy","test_plxy"]
+        for idx, tracker in enumerate([train_loss_tracker, dev_loss_tracker, test_loss_tracker,
+                                       train_plxy_tracker, dev_plxy_tracker, test_plxy_tracker]):
             plt.figure(figsize=(5,5))
             plt.plot(tracker, color = cols[idx], alpha = 0.8)
             plt.title(tracker_names[idx])
             plt.xlabel("epoch")
-            plt.ylabel(task_name)
+            if idx < 3:
+                plt.ylabel(task_name)
+            else:
+                 plt.ylabel("text_perplexity")
             plt.savefig(os.path.join(output_dir, "plot."+tracker_names[idx] +'.per_epoch.pdf'))
             plt.close()
             
@@ -1247,8 +1312,6 @@ def evaluate_training(model, task, task_loss, X, Y, C, eta_bn_prop, output_dir, 
 def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weights_sq=1e-7, regularize=False, bn_anneal=True, init_eta_bn_prop=0.0, rng=None, batch_size = 200,output_dir=None, subset=None, task = None, verbose_updates = False, save_results = True):
     """
     Predict a label for each instance using the classifier (or regression) part of the network
-    
-    # TO DO: test for unsupervised learning evaluations
     """
     n_items, vocab_size = X.shape
     dv = network_architecture['dv']
@@ -1256,7 +1319,10 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
     task = network_architecture['task']
     
     # input a vector of all zeros in place of the labels that the model has been trained on
-    Y_zeros = np.zeros((n_items, network_architecture['n_labels'])).astype('float32')
+    if Y is not None:
+        Y_zeros = np.zeros((n_items, network_architecture['n_labels'])).astype('float32')
+    else:
+        Y_zeros = None
     
     # create np arrays to store regularization strengths, which we'll update outside of the tensorflow model
     if regularize:
@@ -1271,7 +1337,7 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
     total_batch = int(n_items / batch_size)
     display_step = int(total_batch*0.2)
 
-    eta_bn_prop = init_eta_bn_prop  # interpolation between batch norm and no batch norm in final layer of recon
+    eta_bn_prop = 0.0  # interpolation between batch norm and no batch norm in final layer of recon
     kld_weight = 1.0  # could use this to anneal KLD, but not currently doing so
 
     # Start evaluation cycle
@@ -1282,99 +1348,111 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
         task_name = "accuracy"
     elif task == "reg":
         task_name = "mse"
-    # Loop over all observations one-by-one
-    for i in range(total_batch):
-        # get a minibatch
-        ixs = range(batch_size*i,batch_size*(i+1))
-        if Y_zeros is not None and C is not None:
-            obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), C[ixs, :].astype('float32')
-        elif Y_zeros is not None:
-            obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), None
-        elif C is not None:
-            obs_xs, obs_ys, obs_y_zeros, obs_cs =  X[ixs, :].astype('float32'), None, None, C[ixs, :].astype('float32')
-        else:
-            obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), None, None, None
-        # do one update, passing in the data, regularization strengths, and bn
-        loss, task_loss_i, pred, theta = model.predict(X=obs_xs, Y=obs_y_zeros, C=obs_cs, l2_strengths=l2_strengths, 
-                                         l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci,
-                                         eta_bn_prop=eta_bn_prop, kld_weight=kld_weight,is_training=False)
-        # compute accuracy/mse on prediction
-        if network_architecture['n_labels'] > 0 and task == "class":
-            task_loss += np.sum(pred == np.argmax(obs_ys, axis=1)) / float(n_items) # accuracy
-        elif network_architecture['n_labels'] > 0 and task == "reg":
-            task_loss += np.sum((obs_ys - pred)**2) / float(n_items) # mse
-        # Compute average loss
-        avg_loss += loss / n_items
-        avg_task_loss += task_loss_i / n_items
-        # Save predictions
-        if i==0:
-            predictions = pred
-            thetas = theta
-        else:
-            predictions = np.append(predictions,pred,axis=0)
-            thetas = np.append(thetas,theta,axis=0)
-            
-        if np.isnan(avg_loss):
-            print(i, np.sum(obs_xs, 1).astype(np.int), obs_xs.shape)
-            print('Encountered NaN, stopping evaluation. Please check the learning_rate settings and the momentum.')
-            # return vae,emb
-            sys.exit()
+    # Loop over all observations
+    if Y is not None:
+        for i in range(total_batch):
+            # get a minibatch
+            ixs = range(batch_size*i,batch_size*(i+1))
+            if Y_zeros is not None and C is not None:
+                obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), C[ixs, :].astype('float32')
+            elif Y_zeros is not None:
+                obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), Y_zeros[ixs, :].astype('float32'), None
+            elif C is not None:
+                obs_xs, obs_ys, obs_y_zeros, obs_cs =  X[ixs, :].astype('float32'), None, None, C[ixs, :].astype('float32')
+            else:
+                obs_xs, obs_ys, obs_y_zeros, obs_cs = X[ixs, :].astype('float32'), None, None, None
+            # do one update, passing in the data, regularization strengths, and bn
+            loss, task_loss_i, pred, theta = model.predict(X=obs_xs, Y=obs_y_zeros, C=obs_cs, l2_strengths=l2_strengths, 
+                                             l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci,
+                                             eta_bn_prop=eta_bn_prop, kld_weight=kld_weight,is_training=False)
+            # compute accuracy/mse on prediction
+            if network_architecture['n_labels'] > 0 and task == "class":
+                task_loss += np.sum(pred == np.argmax(obs_ys, axis=1)) / float(n_items) # accuracy
+            elif network_architecture['n_labels'] > 0 and task == "reg":
+                task_loss += np.sum((obs_ys - pred)**2) / float(n_items) # mse
+            # Compute average loss
+            avg_loss += loss / n_items
+            avg_task_loss += task_loss_i / n_items
+            # Save predictions
+            if i==0:
+                predictions = pred
+                thetas = theta
+            else:
+                predictions = np.append(predictions,pred,axis=0)
+                thetas = np.append(thetas,theta,axis=0)
 
-        # Display logs per observations step
-        if verbose_updates:
-            if i % display_step == 0:
-                if network_architecture['n_labels'] > 0:
-                    print("EVAL {} | ".format(subset),"until obs:", '%d' % i, "; loss =", "{:.9f}".format(avg_loss), "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), "; eval {} so far (noisy) =".format(task_name), "{:.9f}".format(task_loss))
-                    if batch_size > 1:
-                        print("EVAL {} | y_act {}:\n".format(subset,i), obs_ys[:3])
-                        print("EVAL {} | y_pred {}:\n".format(subset,i), pred[:3])
+            if np.isnan(avg_loss):
+                print(i, np.sum(obs_xs, 1).astype(np.int), obs_xs.shape)
+                print('Encountered NaN, stopping evaluation. Please check the learning_rate settings and the momentum.')
+                # return vae,emb
+                sys.exit()
+
+            # Display logs per observations step
+            if verbose_updates:
+                if i % display_step == 0:
+                    if network_architecture['n_labels'] > 0:
+                        print("EVAL {} | ".format(subset),"until obs:", '%d' % i, "; loss =", "{:.9f}".format(avg_loss),
+                              "; avg_{}_loss =".format(task_name), "{:.9f}".format(avg_task_loss), 
+                              "; eval {} so far (noisy) =".format(task_name), "{:.9f}".format(task_loss))
+                        if batch_size > 1:
+                            print("EVAL {} | y_act {}:\n".format(subset,i), obs_ys[:3])
+                            print("EVAL {} | y_pred {}:\n".format(subset,i), pred[:3])
+                        else:
+                            print("EVAL {} | y_act {}:\n".format(subset,i), obs_ys)
+                            print("EVAL {} | y_pred {}:\n".format(subset,i), pred)
                     else:
-                        print("EVAL {} | y_act {}:\n".format(subset,i), obs_ys)
-                        print("EVAL {} | y_pred {}:\n".format(subset,i), pred)
-                else:
-                    print("EVAL {} | ", "Obs:".format(subset), '%d' % i, "loss=", "{:.9f}".format(avg_loss))
+                        print("EVAL {} | ", "Obs:".format(subset), '%d' % i, "loss=", "{:.9f}".format(avg_loss))
+    else:
+        # Thetas
+        thetas = model.compute_theta(X, Y, C)
+        avg_loss = np.mean(model.get_losses(X, Y, C))
+        predictions = np.nan
+        task_loss = np.nan
+        avg_task_loss = np.nan
                      
     # Eval perplexity
-    eval_perplexity_all, eval_perplexity_text = evaluate_perplexity(model, X, Y, C, eta_bn_prop=eta_bn_prop)
-    if save_results:
+    eval_perplexity_all, eval_perplexity_text = evaluate_perplexity(model, X, Y, C)
+    
+    # Save
+    if save_results and output_dir is not None:
         print("{} | perplexity = {:.4f}".format(subset, eval_perplexity_text))
         print("{} | {}:".format(subset, task_name),task_loss)
         print("{} | avg. loss:".format(subset),avg_loss)
-        # Predictions
-        pred_series = pd.DataFrame(predictions)
+        
         # Thetas
         np.savez(os.path.join(output_dir, 'theta.'+subset+'.npz'), theta=thetas)
-        #actuals
-        y_series = pd.DataFrame(Y)
-        # only for mse 
-        if task == "reg":
-            # overall
-            pR = 1-(task_loss/np.var(Y))
-            print("{} | R^2 on labels = {:.4f}".format(subset, pR))
-            print("{} | variance of y:".format(subset), np.var(Y))
-            # separate targets
-            if pred_series.shape[1] >1:
-                target_mses = np.sum((y_series - pred_series)**2) / float(y_series.shape[0])
-                target_pRs = 1-(target_mses/np.var(y_series))
-                print("{} | target-variance of y:".format(subset), np.var(y_series).values)
-                print("{} | target-mse on labels =".format(subset), target_mses.values)
-                print("{} | target-R^2 on labels = ".format(subset), target_pRs.values)
-            if output_dir is not None:
-                pd.Series(data = task_loss, name = "mse").to_csv(os.path.join(output_dir,"mse."+subset+'.csv'))
-                pd.Series(data= pR, name = "pR2").to_csv(os.path.join(output_dir,"pR2."+subset+'.csv'))  
-                if pred_series.shape[1] >1:
-                    target_mses.to_csv(os.path.join(output_dir,'mses_per_target.'+subset+'.csv'))
-                    target_pRs.to_csv(os.path.join(output_dir,'pRs_per_target.'+subset+'.csv'))  
-        # save the results to file
-        if output_dir is not None:
-            pd.Series(data= eval_perplexity_all, name = "perplexity").to_csv(os.path.join(output_dir,'perplexity_all.'+subset+'.csv'))
-            pd.Series(data= eval_perplexity_text, name = "perplexity").to_csv(os.path.join(output_dir,'perplexity_text.'+subset+'.csv'))
-            # save actuals and predictions
+        
+        # save perplexities
+        pd.Series(data= eval_perplexity_all, name = "perplexity").to_csv(os.path.join(output_dir,'perplexity_all.'+subset+'.csv'))
+        pd.Series(data= eval_perplexity_text, name = "perplexity").to_csv(os.path.join(output_dir,'perplexity_text.'+subset+'.csv'))
+        
+        if Y is not None:
+            # Actuals and predictions
+            pred_series = pd.DataFrame(predictions)
+            y_series = pd.DataFrame(Y)
             y_series.to_csv(os.path.join(output_dir,'y_actuals.'+subset+'.csv'))
             pred_series.to_csv(os.path.join(output_dir,'y_predictions.'+subset+'.csv'))
-            
+
+            if task == "reg":
+                # overall
+                pR = 1-(task_loss/np.var(Y))
+                print("{} | R^2 on labels = {:.4f}".format(subset, pR))
+                print("{} | variance of y:".format(subset), np.var(Y))
+                # separate targets
+                if pred_series.shape[1] >1:
+                    target_mses = np.sum((y_series - pred_series)**2) / float(y_series.shape[0])
+                    target_pRs = 1-(target_mses/np.var(y_series))
+                    print("{} | target-variance of y:".format(subset), np.var(y_series).values)
+                    print("{} | target-mse on labels =".format(subset), target_mses.values)
+                    print("{} | target-R^2 on labels = ".format(subset), target_pRs.values)
+                    pd.Series(data = task_loss, name = "mse").to_csv(os.path.join(output_dir,"mse."+subset+'.csv'))
+                    pd.Series(data= pR, name = "pR2").to_csv(os.path.join(output_dir,"pR2."+subset+'.csv'))  
+                    if pred_series.shape[1] >1:
+                        target_mses.to_csv(os.path.join(output_dir,'mses_per_target.'+subset+'.csv'))
+                        target_pRs.to_csv(os.path.join(output_dir,'pRs_per_target.'+subset+'.csv'))  
+
     
-    return predictions, task_loss, avg_loss, avg_task_loss, eval_perplexity_all, eval_perplexity_text 
+    return predictions, task_loss, avg_loss, avg_task_loss, eval_perplexity_all, eval_perplexity_text
     
 
 
