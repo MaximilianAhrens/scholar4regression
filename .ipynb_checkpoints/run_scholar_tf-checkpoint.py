@@ -179,10 +179,12 @@ def main():
     n_train, dv = train_X.shape
     
     if train_X.shape[0] < batch_size:
+        print("\n\n\n\n##########")
         print("Batch-size overwritten. Training sample size is {}. Original batch size was {}.".format(train_X.shape[0],batch_size))
         batch_size = train_X.shape[0]
-        print("New batch size is:".format(batch_size))
-
+        print("New batch size is:", batch_size)
+        print("\n\n\n\n##########")
+        
     if train_labels is not None:
         _, n_labels = train_labels.shape
     else:
@@ -629,8 +631,8 @@ def save_latent_vars(model, task, vocab, n_covariates, covariate_names, use_cova
     # get regression weights
     if task =="reg":
         W, b = model.get_reg_weights()
-        pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.last_epoch.csv'))
-        pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.last_epoch.csv'))
+        pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.'+subset+'.csv'))
+        pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.'+subset+'.csv'))
 
     # print background
     bg = model.get_bg()
@@ -803,9 +805,9 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     print("training | epoch: {} | new best training {}: {:.4}".format(epoch, task_name, best_train_loss))
                     model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-train_mse={:g}-epoch{}.ckpt'.format(best_train_loss, epoch))
                     # save regression coefficients
-                    W, b = model.get_reg_weights()
-                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_train.csv'))
-                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_train.csv'))
+                    #W, b = model.get_reg_weights()
+                    #pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_train.csv'))
+                    #pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_train.csv'))
                     _, _, _, _, _, train_plxy_text = evaluate(model=model, 
                                             network_architecture=network_architecture,
                                             X=X, Y=Y, C=C,
@@ -875,9 +877,9 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
                     print("validation | epoch: {} | new best validation {}: {:.4}".format(epoch, task_name,best_loss))
                     model.best_mse_saver.save(model.sess, model.checkpoint_dir + '/best-model-val_mse={:g}-epoch{}.ckpt'.format(best_loss, epoch))
                     # save regression coefficients
-                    W, b = model.get_reg_weights()
-                    pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_dev.csv'))
-                    pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_dev.csv'))
+                    #W, b = model.get_reg_weights()
+                    #pd.DataFrame(data = W).to_csv(os.path.join(output_dir, 'regression_weights.best_dev.csv'))
+                    #pd.DataFrame(data = b).to_csv(os.path.join(output_dir, 'regression_bias.best_dev.csv'))
                     # save latent variables
                     save_latent_vars(model, task, vocab, n_covariates, covariate_names, 
                                      use_covar_interactions, covar_emb_dim, no_bg, output_dir, 
@@ -1438,6 +1440,8 @@ def evaluate(model, network_architecture, X, Y, C, display_step= 200, min_weight
                 pR = 1-(task_loss/np.var(Y))
                 print("{} | R^2 on labels = {:.4f}".format(subset, pR))
                 print("{} | variance of y:".format(subset), np.var(Y))
+                pd.Series(data = task_loss, name = "mse").to_csv(os.path.join(output_dir,"mse."+subset+'.csv'))
+                pd.Series(data= pR, name = "pR2").to_csv(os.path.join(output_dir,"pR2."+subset+'.csv'))  
                 # separate targets
                 if pred_series.shape[1] >1:
                     target_mses = np.sum((y_series - pred_series)**2) / float(y_series.shape[0])
