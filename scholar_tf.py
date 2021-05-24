@@ -156,7 +156,7 @@ class Scholar(object):
     def _classifier_network(self):
         n_labels = self.network_architecture['n_labels']
         dh = self.network_architecture['n_topics']
-        regression_layers = self.network_architecture['regression_layers']     
+        classifier_layers = self.network_architecture['classifier_layers']     
         n_covariates = self.network_architecture['n_covariates']  
         
         if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
@@ -182,8 +182,12 @@ class Scholar(object):
         n_labels = self.network_architecture['n_labels']
         dh = self.network_architecture['n_topics']
         regression_layers = self.network_architecture['regression_layers']     
+        regression_units = self.network_architecture['regression_units']     
         n_covariates = self.network_architecture['n_covariates']     
         covar_emb_dim = self.network_architecture['covar_emb_dim']
+        
+        if regression_units == 0:
+            regression_units = dh
         
         if n_covariates > 0 and self.network_architecture['covars_in_downstream_task']:
             regression_input = tf.concat([self.theta, self.c_emb], axis=1)
@@ -196,23 +200,27 @@ class Scholar(object):
             else:
                 self.pred_y = tf.matmul(regression_input,self.reg_weights)
         elif regression_layers == 1:
-            reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
+            reg0 = slim.layers.linear(regression_input, regression_units, scope='reg0')
             reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
-            if self.reg_intercept:
-                self.pred_y = tf.add(tf.matmul(reg0_sp,self.reg_weights), self.reg_bias)
-            else:
-                self.pred_y = tf.matmul(reg0_sp,self.reg_weights)
-            #self.pred_y = slim.layers.linear(reg0_sp, n_labels, scope='pred_y')
-        else:
-            reg0 = slim.layers.linear(regression_input, dh, scope='reg0')
+            self.pred_y = slim.layers.linear(reg0_sp, n_labels, scope='pred_y')
+        elif regression_layers == 2:
+            reg0 = slim.layers.linear(regression_input, regression_units, scope='reg0')
             reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
-            reg1 = slim.layers.linear(reg0_sp, dh, scope='reg1')
+            reg1 = slim.layers.linear(reg0_sp, regression_units, scope='reg1')
             reg1_sp = tf.nn.softplus(reg1, name='reg1_softplus')
-            if self.reg_intercept:
-                self.pred_y = tf.add(tf.matmul(reg0_sp,self.reg_weights), self.reg_bias)
-            else:
-                self.pred_y = tf.matmul(reg0_sp,self.reg_weights)
-            #self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
+            self.pred_y = slim.layers.linear(reg1_sp, n_labels, scope='pred_y')
+        else:
+            reg0 = slim.layers.linear(regression_input, regression_units, scope='reg0')
+            reg0_sp = tf.nn.softplus(reg0, name='reg0_softplus')
+            reg1 = slim.layers.linear(reg0_sp, regression_units, scope='reg1')
+            reg1_sp = tf.nn.softplus(reg1, name='reg1_softplus')
+            reg2 = slim.layers.linear(reg1_sp, regression_units, scope='reg2')
+            reg2_sp = tf.nn.softplus(reg2, name='reg2_softplus')
+            reg3 = slim.layers.linear(reg2_sp, regression_units, scope='reg3')
+            reg3_sp = tf.nn.softplus(reg3, name='reg3_softplus')
+            reg4 = slim.layers.linear(reg3_sp, regression_units, scope='reg4')
+            reg4_sp = tf.nn.softplus(reg4, name='reg4_softplus')
+            self.pred_y = slim.layers.linear(reg4_sp, n_labels, scope='pred_y')
     
 
     def _create_network(self):
@@ -225,8 +233,6 @@ class Scholar(object):
         covar_emb_dim = self.network_architecture['covar_emb_dim']
         emb_size = words_emb_dim
         use_covar_interactions = self.network_architecture['use_covar_interactions']
-        classifier_layers = self.network_architecture['classifier_layers']
-        regression_layers = self.network_architecture['regression_layers']
 
         self.network_weights = self._initialize_weights()
         

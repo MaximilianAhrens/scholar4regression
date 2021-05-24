@@ -85,7 +85,9 @@ def main():
                       help='Random seed: default=%default')
     # own addition
     parser.add_option('--r-layers', dest='regression_layers', default=0,
-                      help='Number of layers in (generative) regression [0|1|2]: default=%default')
+                      help='Number of layers in regression [0|1|2|>2]: default=%default')
+    parser.add_option('--r-units', dest='regression_units', default=0,
+                      help='Width of layers in regression [0|1|2|>2]: default=%default')
     parser.add_option('--task', dest='task', default="reg",
                       help='Select downstream task: either "class" or "reg".')
     parser.add_option('--reg-intercept', action="store_true", dest='reg_intercept', default=False,
@@ -146,7 +148,8 @@ def main():
     dev_fold = int(options.dev_fold)
     optimizer = options.optimizer
     seed = options.seed
-    regression_layers = options.regression_layers
+    regression_layers = int(options.regression_layers)
+    regression_units = int(options.regression_units)
     task = options.task
     reg_intercept = options.reg_intercept
     test_on_the_fly = options.test_on_the_fly
@@ -297,7 +300,8 @@ def main():
                                         n_topics, encoder_shortcuts, label_type, n_labels, label_emb_dim,
                                         covariates_type, n_covariates, covar_emb_dim, use_covar_interactions,
                                         classifier_layers, covars_in_downstream_task, regression_layers, task=task, reg_intercept=reg_intercept,
-                                       test_on_the_fly = test_on_the_fly, train_eval = train_eval, recent_saves = recent_saves, eval_last_epoch = eval_last_epoch)  # make_network()
+                                       test_on_the_fly = test_on_the_fly, train_eval = train_eval, recent_saves = recent_saves, eval_last_epoch = eval_last_epoch,
+                                       regression_units = regression_units)  # make_network()
 
     print("Network architecture:")
     for key, val in network_architecture.items():
@@ -595,7 +599,7 @@ def create_minibatch(X, Y, C, batch_size=200, rng=None):
 
             
 
-def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_downstream_task=True, regression_layers = 0, task = "reg", reg_intercept=True, test_on_the_fly = False, train_eval = False, recent_saves = False, eval_last_epoch = False):
+def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_downstream_task=True, regression_layers = 0, task = "reg", reg_intercept=True, test_on_the_fly = False, train_eval = False, recent_saves = False, eval_last_epoch = False, regression_units = 0):
     """
     Combine the network configuration parameters into a dictionary
     """
@@ -621,7 +625,8 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
              test_on_the_fly = test_on_the_fly,
              train_eval = train_eval,
              recent_saves = recent_saves,
-             eval_last_epoch = eval_last_epoch
+             eval_last_epoch = eval_last_epoch,
+             regression_units = regression_units
              )
     return network_architecture
 
