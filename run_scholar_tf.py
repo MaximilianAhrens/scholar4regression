@@ -83,7 +83,7 @@ def main():
                       help='Use this to limit the number of CPUs: default=%default')
     parser.add_option('--seed', dest='seed', default=None,
                       help='Random seed: default=%default')
-    # own addition
+    # rScholar addition
     parser.add_option('--r-layers', dest='regression_layers', default=0,
                       help='Number of layers in regression [0|1|2|>2]: default=%default')
     parser.add_option('--r-units', dest='regression_units', default=0,
@@ -108,8 +108,6 @@ def main():
                       help='Save model every 10 epochs.')
     parser.add_option('--eval-last-epoch', action="store_true", dest='eval_last_epoch', default=False,
                       help='Evaluate based on last training epoch.')
-
-
 
     (options, args) = parser.parse_args()
 
